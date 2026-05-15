@@ -76,6 +76,24 @@ const personEventsResponseSchema = z
   })
   .passthrough();
 
+/**
+ * Person lookup response. We only need the `id` (uuid) for cross-referencing
+ * recordings, which are stored against the canonical person rather than the
+ * individual distinct_ids (anonymous + identified) that map to that person.
+ */
+const personSchema = z
+  .object({
+    id: z.string(),
+    distinct_ids: z.array(z.string()).nullish(),
+  })
+  .passthrough();
+
+const personsListResponseSchema = z
+  .object({
+    results: z.array(personSchema),
+  })
+  .passthrough();
+
 type RecordingListItem = z.infer<typeof recordingListItemSchema>;
 type PersonEvent = z.infer<typeof personEventSchema>;
 
@@ -151,10 +169,21 @@ export class PostHogAdapter implements SessionAdapter {
     const dateFrom = new Date(anchor - half).toISOString();
     const dateTo = new Date(anchor + half).toISOString();
 
+    // PostHog tags each session recording with the distinct_id active at the
+    // time of capture — which is usually the anonymous id, since session
+    // recording starts before identify() resolves. Filtering by distinct_id
+    // therefore misses recordings that PostHog *knows* belong to the same
+    // person via the alias chain. Resolve the canonical person uuid first.
+    const personUuid = await this.fetchPersonUuid(opts.userId);
+
+    const recordingQuery = personUuid
+      ? `?person_uuid=${encodeURIComponent(personUuid)}`
+      : `?distinct_id=${encodeURIComponent(opts.userId)}`;
+
     const listPath =
       `/api/projects/${encodeURIComponent(this.projectId)}` +
       `/session_recordings/` +
-      `?person_id=${encodeURIComponent(opts.userId)}` +
+      recordingQuery +
       `&date_from=${encodeURIComponent(dateFrom)}` +
       `&date_to=${encodeURIComponent(dateTo)}` +
       `&limit=${RECORDING_FETCH_LIMIT}`;
@@ -235,6 +264,26 @@ export class PostHogAdapter implements SessionAdapter {
   /* ----------------------------------------------------------------------- */
   /* Private                                                                  */
   /* ----------------------------------------------------------------------- */
+
+  /**
+   * Resolve the canonical person uuid for a given distinct_id. Returns null
+   * if the person doesn't exist yet (e.g. brand-new user with no events
+   * propagated). Errors are swallowed and returned as null so a missing
+   * person never blocks the recording lookup — we fall back to a direct
+   * distinct_id filter in that case.
+   */
+  private async fetchPersonUuid(distinctId: string): Promise<string | null> {
+    try {
+      const path =
+        `/api/projects/${encodeURIComponent(this.projectId)}/persons/` +
+        `?distinct_id=${encodeURIComponent(distinctId)}`;
+      const response = await this.posthogGet(path, personsListResponseSchema);
+      const first = response.results[0];
+      return first ? first.id : null;
+    } catch {
+      return null;
+    }
+  }
 
   /**
    * GET + retry + parse. Retries on 429 and 5xx with exponential backoff and
