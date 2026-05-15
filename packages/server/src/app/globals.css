@@ -3,40 +3,60 @@
 @tailwind utilities;
 
 /*
- * Crashscope landing-page tokens.
+ * shadcn/ui design tokens — light theme only.
  *
- * We commit to a dark-only palette to match the developer-tool aesthetic; if
- * we add a light theme later, swap to CSS variables on `.dark` vs `:root`.
+ * We deliberately commit to a single (light) palette with an orange accent.
+ * No `.dark` block, no `prefers-color-scheme` override: the landing page is
+ * a polished, professional surface in one mode.
+ *
+ * HSL values follow shadcn's convention so the components in
+ * `src/components/ui/*` work out of the box.
  */
-:root {
-  color-scheme: dark;
-  --bg: #020617;
-  --bg-elevated: #0f172a;
-  --fg: #f8fafc;
-  --fg-muted: #94a3b8;
-  --border: #1e293b;
-  --accent: #fb923c;
-}
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 20 14.3% 4.1%;
 
-html,
-body {
-  background-color: var(--bg);
-  color: var(--fg);
-}
+    --card: 0 0% 100%;
+    --card-foreground: 20 14.3% 4.1%;
 
-body {
-  font-feature-settings: "rlig" 1, "calt" 1;
-  min-height: 100dvh;
-}
+    --popover: 0 0% 100%;
+    --popover-foreground: 20 14.3% 4.1%;
 
-/* Lightweight code-block styling for the QuickStart section. */
-.code-block {
-  background-color: rgba(15, 23, 42, 0.6);
-  border: 1px solid var(--border);
-  border-radius: 0.5rem;
-  padding: 1rem;
-  font-family: var(--font-mono), ui-monospace, monospace;
-  font-size: 0.875rem;
-  line-height: 1.6;
-  overflow-x: auto;
+    --primary: 24 95% 53%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 60 4.8% 95.9%;
+    --secondary-foreground: 24 9.8% 10%;
+
+    --muted: 60 4.8% 95.9%;
+    --muted-foreground: 25 5.3% 44.7%;
+
+    --accent: 60 4.8% 95.9%;
+    --accent-foreground: 24 9.8% 10%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 60 9.1% 97.8%;
+
+    --border: 20 5.9% 90%;
+    --input: 20 5.9% 90%;
+    --ring: 24 95% 53%;
+
+    --radius: 0.5rem;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    color-scheme: light;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1;
+    min-height: 100dvh;
+  }
 }
