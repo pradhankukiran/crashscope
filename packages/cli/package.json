@@ -1,0 +1,39 @@
+{
+  "name": "crashscope",
+  "version": "0.1.0",
+  "description": "AI-powered error triage CLI for Sentry, Rollbar, Bugsnag, Honeybadger + PostHog/LogRocket sessions.",
+  "type": "module",
+  "bin": {
+    "crashscope": "./bin/crashscope"
+  },
+  "main": "./dist/index.js",
+  "files": [
+    "bin",
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@crashscope/core": "workspace:*",
+    "commander": "^12.1.0",
+    "@inquirer/prompts": "^7.0.0",
+    "chalk": "^5.3.0",
+    "boxen": "^8.0.0",
+    "ora": "^8.1.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "@types/node": "^22.0.0"
+  },
+  "engines": {
+    "node": ">=18.18"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
