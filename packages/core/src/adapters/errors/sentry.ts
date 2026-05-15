@@ -188,31 +188,24 @@ const MAX_BREADCRUMBS = 10;
 const DEFAULT_TIMEOUT_MS = 15_000;
 
 /**
- * Sentry's documented `statsPeriod` values. We snap arbitrary `since` Dates
- * to the closest standard window that fully covers the requested range.
+ * The Sentry issues endpoint only accepts a restricted set of statsPeriod
+ * values: '', '24h', or '14d'. Other values that work elsewhere in the API
+ * (1h, 7d, 30d, 90d) are rejected here with HTTP 400. We snap the caller's
+ * `since` to the smallest supported window that covers it; ranges older than
+ * 14d use '' (no time filter) and then rely on client-side filtering.
+ *
+ * Small tolerance (~5 min) prevents 24.0001-hour boundary fallouts.
  */
-const STATS_PERIODS_HOURS: ReadonlyArray<{ window: string; hours: number }> = [
-  { window: "1h", hours: 1 },
-  { window: "24h", hours: 24 },
-  { window: "7d", hours: 24 * 7 },
-  { window: "14d", hours: 24 * 14 },
-  { window: "30d", hours: 24 * 30 },
-  { window: "90d", hours: 24 * 90 },
-];
+const TOLERANCE_HOURS = 5 / 60;
 
 function pickStatsPeriod(since: Date, now: Date = new Date()): string {
   const elapsedHours = Math.max(
     0,
     (now.getTime() - since.getTime()) / (1000 * 60 * 60),
   );
-  // Smallest standard window that still covers `elapsedHours`.
-  for (const candidate of STATS_PERIODS_HOURS) {
-    if (candidate.hours >= elapsedHours) {
-      return candidate.window;
-    }
-  }
-  // since is older than 90d — use the maximum supported window.
-  return "90d";
+  if (elapsedHours <= 24 + TOLERANCE_HOURS) return "24h";
+  if (elapsedHours <= 14 * 24 + TOLERANCE_HOURS) return "14d";
+  return "";
 }
 
 function mapSeverity(level: string | null | undefined): Severity {
