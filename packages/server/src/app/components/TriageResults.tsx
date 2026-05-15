@@ -1,62 +1,91 @@
 "use client";
 
 /**
- * TriageResults — render a {@link TriageReport} the public POST endpoint
- * returned. Drawn directly underneath the demo form on the landing page.
+ * TriageResults — render a {@link TriageReport} returned by the public POST
+ * endpoint, rebuilt on top of shadcn/ui primitives.
  *
- * This component is presentation-only: it never talks to the API. Everything
- * it needs comes through props.
- *
- * Severity colors deliberately keep `fatal` and `error` distinct (red vs.
- * orange) — fatal in Sentry is a separate level signalling unhandled crashes
- * and we don't want to flatten it into the regular error band.
+ * Pure presentational: never talks to the API. Severity colors deliberately
+ * keep `fatal` and `error` distinct — fatal is a separate Sentry level
+ * signalling unhandled crashes and we don't want to flatten it into the
+ * regular error band.
  */
 
 import { useMemo } from "react";
+import {
+  AlertOctagon,
+  AlertTriangle,
+  ExternalLink,
+  Info,
+  RotateCcw,
+  Video,
+} from "lucide-react";
 import type { TriageIssue, TriageReport } from "@crashscope/core";
+
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Separator } from "@/components/ui/separator";
+import { cn } from "@/lib/utils";
 
 export interface TriageResultsProps {
   report: TriageReport;
-  /** When provided, shown as a "Run again" button in the header. */
+  /** When provided, shown as a "Run again" button in the summary header. */
   onReset?: () => void;
 }
 
 // ----- Severity styling ----------------------------------------------------
 
-interface SeverityTokens {
+type SeverityKey = TriageIssue["severity"];
+type ConfidenceKey = TriageIssue["confidence"];
+
+interface SeverityStyle {
+  /** Badge classes for the severity pill. */
   pill: string;
-  card: string;
+  /** Dot color shown beside the issue title. */
+  dot: string;
+  /** Icon to render inline with the severity. */
+  Icon: typeof AlertOctagon;
 }
 
-const SEVERITY: Record<TriageIssue["severity"], SeverityTokens> = {
+const SEVERITY_STYLE: Record<SeverityKey, SeverityStyle> = {
   fatal: {
-    pill: "bg-red-500/15 text-red-300 border-red-500/40 ring-red-500/30",
-    card: "border-red-500/30",
+    pill: "bg-red-100 text-red-700 border-red-200 hover:bg-red-100",
+    dot: "bg-red-500",
+    Icon: AlertOctagon,
   },
   error: {
-    pill: "bg-orange-500/15 text-orange-300 border-orange-500/40 ring-orange-500/30",
-    card: "border-orange-500/30",
+    pill: "bg-orange-100 text-orange-700 border-orange-200 hover:bg-orange-100",
+    dot: "bg-orange-500",
+    Icon: AlertOctagon,
   },
   warning: {
-    pill: "bg-amber-500/15 text-amber-300 border-amber-500/40 ring-amber-500/30",
-    card: "border-amber-500/30",
+    pill: "bg-amber-100 text-amber-800 border-amber-200 hover:bg-amber-100",
+    dot: "bg-amber-500",
+    Icon: AlertTriangle,
   },
   info: {
-    pill: "bg-blue-500/15 text-blue-300 border-blue-500/40 ring-blue-500/30",
-    card: "border-blue-500/30",
+    pill: "bg-sky-100 text-sky-700 border-sky-200 hover:bg-sky-100",
+    dot: "bg-sky-500",
+    Icon: Info,
   },
 };
 
-const CONFIDENCE_LABEL: Record<TriageIssue["confidence"], string> = {
-  high: "Confidence: high",
-  med: "Confidence: medium",
-  low: "Confidence: low",
+const CONFIDENCE_LABEL: Record<ConfidenceKey, string> = {
+  high: "High confidence",
+  med: "Medium confidence",
+  low: "Low confidence",
 };
 
-const CONFIDENCE_PILL: Record<TriageIssue["confidence"], string> = {
-  high: "bg-emerald-500/15 text-emerald-300 border-emerald-500/40",
-  med: "bg-amber-500/15 text-amber-300 border-amber-500/40",
-  low: "bg-ink-500/15 text-ink-300 border-ink-500/40",
+const CONFIDENCE_STYLE: Record<ConfidenceKey, string> = {
+  high: "bg-emerald-100 text-emerald-700 border-emerald-200 hover:bg-emerald-100",
+  med: "bg-amber-100 text-amber-800 border-amber-200 hover:bg-amber-100",
+  low: "bg-muted text-muted-foreground border-transparent hover:bg-muted",
 };
 
 // ----- Helpers -------------------------------------------------------------
@@ -98,22 +127,25 @@ export function TriageResults({
   report,
   onReset,
 }: TriageResultsProps): JSX.Element {
+  // Cap `now` for the lifetime of a render so relative timestamps stay stable.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const now = useMemo(() => Date.now(), [report]);
   const empty = report.issues.length === 0;
 
   return (
     <div className="flex flex-col gap-6">
-      <Header report={report} {...(onReset ? { onReset } : {})} />
+      <SummaryCard report={report} {...(onReset ? { onReset } : {})} />
       {empty ? (
         <EmptyState window={report.window} />
       ) : (
-        <ul className="flex flex-col gap-4">
-          {report.issues.map((issue) => (
-            <li key={issue.errorId}>
+        <div className="flex flex-col">
+          {report.issues.map((issue, i) => (
+            <div key={issue.errorId}>
+              {i > 0 ? <Separator className="my-6" /> : null}
               <IssueCard issue={issue} now={now} />
-            </li>
+            </div>
           ))}
-        </ul>
+        </div>
       )}
     </div>
   );
@@ -121,7 +153,7 @@ export function TriageResults({
 
 // ----- Subcomponents ------------------------------------------------------
 
-function Header({
+function SummaryCard({
   report,
   onReset,
 }: {
@@ -130,61 +162,68 @@ function Header({
 }): JSX.Element {
   const { summary, window, meta } = report;
   return (
-    <div className="rounded-lg border border-ink-800 bg-ink-900/40 p-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-      <div className="flex flex-col gap-2">
-        <h3 className="text-lg font-semibold">
-          Triage Report{" "}
-          <span className="text-ink-500 font-normal">· {window}</span>
-        </h3>
-        <div className="flex flex-wrap gap-2">
-          <Chip
-            className="bg-red-500/15 text-red-300 border-red-500/40"
-            label={`${summary.high} high`}
-          />
-          <Chip
-            className="bg-amber-500/15 text-amber-300 border-amber-500/40"
-            label={`${summary.med} med`}
-          />
-          <Chip
-            className="bg-blue-500/15 text-blue-300 border-blue-500/40"
-            label={`${summary.low} low`}
-          />
-          <Chip
-            className="bg-ink-800 text-ink-200 border-ink-700"
-            label={`total ${summary.total}`}
-          />
+    <Card>
+      <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex flex-col gap-2">
+          <CardTitle>Triage Report</CardTitle>
+          <CardDescription>
+            Window: <span className="font-medium">{window}</span> · Took{" "}
+            {formatDuration(meta.durationMs)}
+          </CardDescription>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <Badge
+              variant="outline"
+              className="border-red-200 bg-red-50 text-red-700"
+            >
+              {summary.high} high
+            </Badge>
+            <Badge
+              variant="outline"
+              className="border-amber-200 bg-amber-50 text-amber-800"
+            >
+              {summary.med} med
+            </Badge>
+            <Badge
+              variant="outline"
+              className="border-sky-200 bg-sky-50 text-sky-700"
+            >
+              {summary.low} low
+            </Badge>
+            <Badge variant="secondary">total {summary.total}</Badge>
+          </div>
         </div>
-      </div>
-      <div className="flex flex-col items-start sm:items-end gap-1 text-xs text-ink-400">
-        <span className="font-mono">
-          {meta.errorProvider} → {meta.sessionProvider}
-        </span>
-        <span>Took {formatDuration(meta.durationMs)}</span>
-        {onReset ? (
-          <button
-            type="button"
-            onClick={onReset}
-            className="mt-2 rounded-md border border-ink-700 bg-ink-900/60 px-3 py-1.5 text-xs text-ink-200 hover:border-ink-500 transition-colors"
-          >
-            Run again
-          </button>
-        ) : null}
-      </div>
-    </div>
+        <div className="flex flex-col items-start gap-2 text-xs text-muted-foreground sm:items-end">
+          <span className="font-mono">
+            {meta.errorProvider} → {meta.sessionProvider}
+          </span>
+          {onReset ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={onReset}
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              Run again
+            </Button>
+          ) : null}
+        </div>
+      </CardHeader>
+    </Card>
   );
 }
 
 function EmptyState({ window }: { window: string }): JSX.Element {
   return (
-    <div className="rounded-lg border border-dashed border-ink-700 bg-ink-900/40 p-10 text-center">
-      <p className="text-sm text-ink-300">
-        Nothing to triage in the {window}.
-      </p>
-      <p className="mt-1 text-xs text-ink-500">
-        Either your providers are quiet, or your filter is too tight. Try a
-        wider window.
-      </p>
-    </div>
+    <Card className="border-dashed">
+      <CardContent className="flex flex-col items-center gap-2 py-12 text-center">
+        <p className="text-sm font-medium">Nothing to triage in the {window}.</p>
+        <p className="text-xs text-muted-foreground">
+          Either your providers are quiet, or your filter is too tight. Try a
+          wider window.
+        </p>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -195,120 +234,122 @@ function IssueCard({
   issue: TriageIssue;
   now: number;
 }): JSX.Element {
-  const tokens = SEVERITY[issue.severity];
+  const style = SEVERITY_STYLE[issue.severity];
   return (
-    <article
-      className={`rounded-lg border ${tokens.card} bg-ink-900/40 p-5 flex flex-col gap-4`}
-    >
-      <header className="flex flex-wrap items-start gap-3 justify-between">
-        <div className="flex flex-col gap-2 min-w-0">
+    <Card className="shadow-none">
+      <CardHeader className="pb-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex min-w-0 flex-col gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge
+                variant="outline"
+                className={cn("uppercase tracking-wider", style.pill)}
+              >
+                <style.Icon className="h-3.5 w-3.5" />
+                {issue.severity}
+              </Badge>
+              <span
+                className={cn(
+                  "inline-block h-1.5 w-1.5 rounded-full",
+                  style.dot,
+                )}
+                aria-hidden
+              />
+              <CardTitle className="text-sm font-mono">
+                {issue.title}
+              </CardTitle>
+              <Badge variant="secondary" className="font-mono">
+                {issue.provider}
+              </Badge>
+              {issue.environment ? (
+                <Badge variant="outline" className="font-mono text-xs">
+                  env: {issue.environment}
+                </Badge>
+              ) : null}
+              {issue.releaseVersion ? (
+                <Badge variant="outline" className="font-mono text-xs">
+                  release: {issue.releaseVersion}
+                </Badge>
+              ) : null}
+            </div>
+            <CardDescription>
+              {issue.affectedUsers.toLocaleString()} user
+              {issue.affectedUsers === 1 ? "" : "s"} ·{" "}
+              {issue.eventCount.toLocaleString()} event
+              {issue.eventCount === 1 ? "" : "s"} · last{" "}
+              {formatRelative(issue.lastSeen, now)}
+            </CardDescription>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-5">
+        <Block label="User flow" body={issue.userJourney} />
+        <Block label="Hypothesis" body={issue.hypothesis} />
+        <Block label="Root cause" body={issue.rootCauseGuess} />
+
+        {issue.suggestedFiles.length > 0 ? (
           <div className="flex flex-wrap items-center gap-2">
-            <span
-              className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider ring-1 ${tokens.pill}`}
+            <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
+              Check
+            </span>
+            {issue.suggestedFiles.map((f) => (
+              <code
+                key={f}
+                className="rounded border bg-muted px-1.5 py-0.5 font-mono text-[11px] text-foreground"
+              >
+                {f}
+              </code>
+            ))}
+          </div>
+        ) : null}
+
+        <Separator />
+
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <a
+              href={issue.sourceUrl}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline"
             >
-              {issue.severity}
-            </span>
-            <span className="text-[11px] font-mono uppercase text-ink-500">
-              {issue.provider}
-            </span>
-            {issue.environment ? (
-              <span className="text-[11px] font-mono text-ink-500">
-                env: {issue.environment}
-              </span>
-            ) : null}
-            {issue.releaseVersion ? (
-              <span className="text-[11px] font-mono text-ink-500">
-                release: {issue.releaseVersion}
-              </span>
+              Open in {capitalize(issue.provider)}
+              <ExternalLink className="h-3 w-3" />
+            </a>
+            {issue.replayUrl ? (
+              <a
+                href={issue.replayUrl}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline"
+              >
+                <Video className="h-3 w-3" />
+                Watch replay
+                <ExternalLink className="h-3 w-3" />
+              </a>
             ) : null}
           </div>
-          <h4 className="font-mono text-sm text-ink-100 break-words">
-            {issue.title}
-          </h4>
-        </div>
-        <span
-          className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider ${CONFIDENCE_PILL[issue.confidence]}`}
-        >
-          {CONFIDENCE_LABEL[issue.confidence]}
-        </span>
-      </header>
-
-      <p className="text-xs text-ink-400">
-        Affected {issue.affectedUsers.toLocaleString()} user
-        {issue.affectedUsers === 1 ? "" : "s"} ·{" "}
-        {issue.eventCount.toLocaleString()} event
-        {issue.eventCount === 1 ? "" : "s"} · last {formatRelative(issue.lastSeen, now)}
-      </p>
-
-      <Block label="User flow" body={issue.userJourney} />
-      <Block label="Hypothesis" body={issue.hypothesis} />
-      <Block label="Root cause" body={issue.rootCauseGuess} />
-
-      {issue.suggestedFiles.length > 0 ? (
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[11px] uppercase tracking-wider text-ink-500">
-            Check
-          </span>
-          {issue.suggestedFiles.map((f) => (
-            <code
-              key={f}
-              className="font-mono text-[11px] rounded bg-ink-950/60 border border-ink-800 px-1.5 py-0.5 text-ink-200"
-            >
-              {f}
-            </code>
-          ))}
-        </div>
-      ) : null}
-
-      <footer className="flex flex-wrap items-center gap-3 pt-1">
-        <a
-          href={issue.sourceUrl}
-          target="_blank"
-          rel="noreferrer noopener"
-          className="text-xs text-brand-300 hover:text-brand-200 underline-offset-4 hover:underline"
-        >
-          Open in {capitalize(issue.provider)} ↗
-        </a>
-        {issue.replayUrl ? (
-          <a
-            href={issue.replayUrl}
-            target="_blank"
-            rel="noreferrer noopener"
-            className="text-xs text-brand-300 hover:text-brand-200 underline-offset-4 hover:underline"
+          <Badge
+            variant="outline"
+            className={cn(CONFIDENCE_STYLE[issue.confidence])}
           >
-            Watch replay ↗
-          </a>
-        ) : null}
-      </footer>
-    </article>
+            {CONFIDENCE_LABEL[issue.confidence]}
+          </Badge>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
 function Block({ label, body }: { label: string; body: string }): JSX.Element {
   return (
-    <div>
-      <span className="text-[11px] uppercase tracking-wider text-ink-500">
+    <div className="flex flex-col gap-1.5">
+      <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
         {label}
       </span>
-      <p className="mt-1 text-sm text-ink-200 leading-relaxed whitespace-pre-wrap">
+      <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">
         {body}
       </p>
     </div>
-  );
-}
-
-function Chip({
-  label,
-  className,
-}: {
-  label: string;
-  className: string;
-}): JSX.Element {
-  return (
-    <span
-      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${className}`}
-    >
-      {label}
-    </span>
   );
 }
