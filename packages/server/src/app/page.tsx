@@ -1,9 +1,10 @@
 /**
- * Landing page — single-page marketing surface assembled from the
- * components in `./components`. Renders entirely on the server; no client-
- * side state.
+ * Landing page — single-page marketing surface assembled from the components
+ * in `./components`. The page itself stays a server component; only the
+ * "Try it now" block ({@link DemoSection}) is a client island.
  */
 import { AdapterMatrix } from "./components/AdapterMatrix";
+import { DemoSection } from "./components/DemoSection";
 import { Footer } from "./components/Footer";
 import { Hero } from "./components/Hero";
 import { HowItWorks } from "./components/HowItWorks";
@@ -13,6 +14,7 @@ export default function HomePage(): JSX.Element {
   return (
     <main className="flex-1">
       <Hero />
+      <DemoSection />
       <HowItWorks />
       <AdapterMatrix />
       <QuickStart />
