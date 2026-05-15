@@ -1,0 +1,42 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Crashscope landing-page tokens.
+ *
+ * We commit to a dark-only palette to match the developer-tool aesthetic; if
+ * we add a light theme later, swap to CSS variables on `.dark` vs `:root`.
+ */
+:root {
+  color-scheme: dark;
+  --bg: #020617;
+  --bg-elevated: #0f172a;
+  --fg: #f8fafc;
+  --fg-muted: #94a3b8;
+  --border: #1e293b;
+  --accent: #fb923c;
+}
+
+html,
+body {
+  background-color: var(--bg);
+  color: var(--fg);
+}
+
+body {
+  font-feature-settings: "rlig" 1, "calt" 1;
+  min-height: 100dvh;
+}
+
+/* Lightweight code-block styling for the QuickStart section. */
+.code-block {
+  background-color: rgba(15, 23, 42, 0.6);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  padding: 1rem;
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.875rem;
+  line-height: 1.6;
+  overflow-x: auto;
+}
