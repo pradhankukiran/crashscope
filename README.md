@@ -1,11 +1,43 @@
-# crashscope
+<p align="center">
+  <a href="https://github.com/pradhankukiran/crashscope">
+    <img src="./assets/banner.svg" alt="crashscope — AI-powered error triage for your stack" width="100%"/>
+  </a>
+</p>
 
-> AI-powered error triage that pairs your error tracker with session replay and Claude.
+<h1 align="center">crashscope</h1>
+
+<p align="center">
+  <strong>AI-powered error triage that knows what the user did before the crash.</strong>
+  <br/>
+  Pairs your error tracker with session replay and uses Claude to produce ranked, actionable triage reports — for the terminal, Slack, or your own API consumer.
+</p>
+
+<p align="center">
+  <a href="#license"><img alt="License" src="https://img.shields.io/badge/license-MIT-f97316?style=flat-square"/></a>
+  <a href="#monorepo-layout"><img alt="Monorepo" src="https://img.shields.io/badge/monorepo-pnpm%20workspaces-F69220?style=flat-square&logo=pnpm&logoColor=white"/></a>
+  <a href="#project-status"><img alt="Status" src="https://img.shields.io/badge/status-0.1.0%20alpha-ea580c?style=flat-square"/></a>
+  <a href="https://nodejs.org"><img alt="Node" src="https://img.shields.io/badge/node-%3E%3D18.18-43853d?style=flat-square&logo=nodedotjs&logoColor=white"/></a>
+  <a href="https://www.typescriptlang.org"><img alt="TypeScript" src="https://img.shields.io/badge/typescript-strict-3178C6?style=flat-square&logo=typescript&logoColor=white"/></a>
+</p>
+
+<p align="center">
+  <a href="#quick-start--cli"><img src="https://img.shields.io/badge/install_CLI-npm_i_--g_crashscope-000?style=for-the-badge&logo=npm&logoColor=white"/></a>
+  &nbsp;
+  <a href="#quick-start--server"><img src="https://img.shields.io/badge/Deploy_to_Vercel-▲-black?style=for-the-badge&logo=vercel&logoColor=white"/></a>
+</p>
+
+<p align="center">
+  <a href="#architecture">Architecture</a> ·
+  <a href="#adapter-matrix">Adapters</a> ·
+  <a href="#api-reference">API</a> ·
+  <a href="#tech-stack">Tech stack</a> ·
+  <a href="packages/cli/README.md">CLI docs</a> ·
+  <a href="packages/server/README.md">Server docs</a>
+</p>
+
+---
 
 crashscope pulls fresh issues from your error tracker, joins each one against the user session that produced it, and asks Claude to investigate. The output is a ranked triage report — hypothesis, root-cause guess, files to inspect, user journey, confidence — delivered to your terminal, Slack, or a REST endpoint. Install the CLI for on-demand local runs, or deploy the server to expose `/api/triage` and a `/triage` Slack command across your team.
-
-**Quick links:**
-[CLI install](packages/cli/README.md) · [Vercel deploy](packages/server/README.md) · [Architecture](#architecture) · [Adapters](#adapter-matrix)
 
 ## Why
 
@@ -37,12 +69,22 @@ deployment modes
 ────────────────
 local CLI       :  `crashscope triage`  ──>  prints to terminal / posts to Slack
 Vercel server   :  GET /api/triage      ──>  TriageReport JSON
+                   POST /api/triage     ──>  public demo with body credentials
                    POST /api/slack/*    ──>  /triage slash command
 ```
 
 Both surfaces share `@crashscope/core` — same adapters, same investigation loop, same report shape. The split is purely about where the process runs.
 
 ## Adapter matrix
+
+<p>
+  <img alt="Sentry"      src="https://img.shields.io/badge/Sentry-supported-362D59?style=flat-square&logo=sentry&logoColor=white"/>
+  <img alt="Rollbar"     src="https://img.shields.io/badge/Rollbar-supported-3F65F1?style=flat-square&logo=rollbar&logoColor=white"/>
+  <img alt="Bugsnag"     src="https://img.shields.io/badge/Bugsnag-supported-4949E4?style=flat-square&logo=bugsnag&logoColor=white"/>
+  <img alt="Honeybadger" src="https://img.shields.io/badge/Honeybadger-supported-EE5E37?style=flat-square"/>
+  <img alt="PostHog"     src="https://img.shields.io/badge/PostHog-supported-1D4AFF?style=flat-square&logo=posthog&logoColor=white"/>
+  <img alt="LogRocket"   src="https://img.shields.io/badge/LogRocket-supported-764ABC?style=flat-square&logo=logrocket&logoColor=white"/>
+</p>
 
 | Category | Provider     | Status |
 | -------- | ------------ | ------ |
@@ -57,7 +99,7 @@ Both surfaces share `@crashscope/core` — same adapters, same investigation loo
 | Outputs  | REST API     | ✓      |
 | Outputs  | JSON         | ✓      |
 
-All adapters live in `packages/core/src/adapters/{errors,sessions}` and implement the `ErrorAdapter` / `SessionAdapter` interfaces from `@crashscope/core`.
+All adapters live in `packages/core/src/adapters/{errors,sessions}` and implement the `ErrorAdapter` / `SessionAdapter` interfaces from `@crashscope/core`. Adding a new provider is roughly 100 lines plus a Zod schema — see [CONTRIBUTING.md](CONTRIBUTING.md#adding-a-new-adapter).
 
 ## Quick start — CLI
 
@@ -74,7 +116,7 @@ The wizard validates each credential against the live API as it goes, so you fin
 ## Quick start — Server
 
 ```sh
-git clone <your-fork>
+git clone https://github.com/pradhankukiran/crashscope.git
 cd crashscope
 pnpm install
 cp packages/server/.env.example packages/server/.env.local
@@ -82,11 +124,11 @@ cp packages/server/.env.example packages/server/.env.local
 pnpm --filter @crashscope/server dev
 ```
 
-Dev server runs at `http://localhost:3000`. To deploy on Vercel, click the button in [packages/server/README.md](packages/server/README.md) or push a connected repo and copy the env vars into your project settings. The Next.js routes use the Node runtime (`maxDuration = 300`) so a long-running investigation finishes within Vercel's serverless limits.
+Dev server runs at `http://localhost:3000`. The landing page includes a **public demo form** — visitors paste their own credentials, run a live triage, and see the report rendered on the page (nothing stored server-side). To deploy on Vercel, click the button in [packages/server/README.md](packages/server/README.md) or push a connected repo and paste env vars into your project settings.
 
 ## Authentication
 
-crashscope has two distinct auth paths for Claude. The **CLI** prefers your local Claude Code subscription — if the `claude` binary is on `PATH` and a `~/.claude` directory exists, that path is used and no API key is needed. If that's missing, the CLI falls back to `ANTHROPIC_API_KEY` (env var or `anthropic.apiKey` in the config file). The **server** is API-key only: serverless functions don't have access to the local Claude Code auth context, so `ANTHROPIC_API_KEY` is required.
+crashscope has two distinct auth paths for Claude. The **CLI** prefers your local Claude Code subscription — if the `claude` binary is on `PATH` and a `~/.claude` directory exists, that path is used and no API key is needed. If that's missing, the CLI falls back to `ANTHROPIC_API_KEY` (env var or `anthropic.apiKey` in the config file). The **server** is API-key only: serverless functions don't have access to the local Claude Code auth context, so `ANTHROPIC_API_KEY` is required for the GET endpoint and Slack bot. The **public demo** at `POST /api/triage` requires the visitor to bring their own key in the request body.
 
 ## Monorepo layout
 
@@ -96,6 +138,9 @@ crashscope/
 │   ├── core/      # @crashscope/core — types, Zod schemas, agent loop, 4 error + 2 session adapters
 │   ├── cli/       # crashscope — npm-installable CLI; commands: init, triage, config
 │   └── server/    # @crashscope/server — Next.js app: landing page, REST /api/triage, Slack bot
+├── examples/
+│   └── test-app/  # static HTML harness for generating matched Sentry + PostHog test data
+├── assets/        # branding assets
 ├── pnpm-workspace.yaml
 ├── tsconfig.base.json
 └── package.json   # workspace root
@@ -150,7 +195,39 @@ GET /api/triage?since=24h&limit=25&severity=fatal,error
 Authorization: Bearer <CRASHSCOPE_API_TOKEN>
 ```
 
-Returns a `TriageReport` JSON object (typed in `@crashscope/core`). `since` accepts `1h | 6h | 24h | 7d | 14d | 30d`. `limit` defaults to 25, max 100. `severity` is a comma-separated subset of `fatal,error,warning,info`. Errors return `{ error, message, requestId }`; an `X-Request-Id` header is set on every response for log correlation. Full status-code table in [packages/server/README.md](packages/server/README.md#rest-api).
+```http
+POST /api/triage
+Content-Type: application/json
+
+{ "errorProvider": "sentry", "sessionProvider": "posthog",
+  "credentials": { "sentry": {...}, "posthog": {...} },
+  "anthropic":   { "apiKey": "sk-ant-..." },
+  "opts":        { "since": "24h", "limit": 25 } }
+```
+
+Both return a `TriageReport` JSON object (typed in `@crashscope/core`). `since` accepts `1h | 6h | 24h | 7d | 14d | 30d`. `limit` defaults to 25, max 100. `severity` is a comma-separated subset of `fatal,error,warning,info`. Errors return `{ error, message, requestId }`; an `X-Request-Id` header is set on every response for log correlation. Full status-code table in [packages/server/README.md](packages/server/README.md#rest-api).
+
+## Tech stack
+
+<p>
+  <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white"/>
+  <img alt="Next.js"    src="https://img.shields.io/badge/Next.js_14-000000?style=for-the-badge&logo=nextdotjs&logoColor=white"/>
+  <img alt="React"      src="https://img.shields.io/badge/React_18-20232A?style=for-the-badge&logo=react&logoColor=61DAFB"/>
+  <img alt="Tailwind"   src="https://img.shields.io/badge/Tailwind_CSS-06B6D4?style=for-the-badge&logo=tailwindcss&logoColor=white"/>
+  <img alt="shadcn/ui"  src="https://img.shields.io/badge/shadcn%2Fui-000000?style=for-the-badge&logo=shadcnui&logoColor=white"/>
+  <img alt="Zod"        src="https://img.shields.io/badge/Zod-3068b7?style=for-the-badge&logo=zod&logoColor=white"/>
+  <img alt="Anthropic"  src="https://img.shields.io/badge/Anthropic_Claude-CC785C?style=for-the-badge&logo=anthropic&logoColor=white"/>
+  <img alt="Vercel"     src="https://img.shields.io/badge/Vercel-000000?style=for-the-badge&logo=vercel&logoColor=white"/>
+  <img alt="pnpm"       src="https://img.shields.io/badge/pnpm_9-F69220?style=for-the-badge&logo=pnpm&logoColor=white"/>
+</p>
+
+- **Language**: TypeScript with strict mode + `verbatimModuleSyntax` + `exactOptionalPropertyTypes`
+- **Runtime**: Node 18.18+, ESM
+- **Validation**: Zod schemas for every external boundary (provider APIs, request bodies, configs)
+- **AI**: Anthropic Claude via `@anthropic-ai/claude-agent-sdk` with structured tool-use
+- **Server**: Next.js 14 (App Router, Node runtime), shadcn/ui, Tailwind CSS, react-hook-form
+- **CLI**: commander, @inquirer/prompts, chalk, boxen, ora
+- **Build**: pnpm workspaces + TypeScript project references
 
 ## Project status
 
