@@ -221,20 +221,30 @@ function buildSummary(issues: TriageIssue[]): TriageSummary {
  *
  * Throws on configuration or auth errors so the calling route can map them to
  * the correct HTTP status. Per-issue failures are absorbed into the report.
+ *
+ * @param opts - Window, limit, severity filter, optional abort signal.
+ * @param configOverride - When provided, use this {@link CrashscopeConfig}
+ *   directly instead of building one from env. Used by the public POST demo
+ *   endpoint, which carries credentials in the request body. Visitors of the
+ *   landing page never touch the operator's env vars.
  */
-export async function runTriage(opts: TriageOptions): Promise<TriageReport> {
+export async function runTriage(
+  opts: TriageOptions,
+  configOverride?: CrashscopeConfig,
+): Promise<TriageReport> {
   const startedAt = Date.now();
   const limit = Math.min(100, Math.max(1, Math.floor(opts.limit)));
   const window = parseSinceWindow(opts.since);
 
-  const config = buildConfig();
+  const config = configOverride ?? buildConfig();
 
   // Server-mode hard requirement: we will not silently fall through to the
-  // Claude Code subscription path inside a serverless function.
+  // Claude Code subscription path inside a serverless function. This applies
+  // identically to the env-driven and override-driven code paths.
   if (!config.anthropic?.apiKey) {
     throw new AuthError(
       "anthropic",
-      "Server mode requires ANTHROPIC_API_KEY. The Claude Code subscription path is not supported here.",
+      "Server mode requires an Anthropic API key. The Claude Code subscription path is not supported here.",
     );
   }
   const auth: AuthResolution = await resolveAnthropicAuth(config.anthropic);
