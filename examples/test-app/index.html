@@ -6,15 +6,23 @@
     <title>Crashscope · Test Harness</title>
     <style>
       :root {
-        --bg: #0b0d10;
-        --panel: #14171c;
-        --line: #1f242c;
-        --text: #e6e9ef;
-        --muted: #8b94a3;
-        --accent: #7c5cff;
-        --danger: #ff5c7a;
-        --success: #4ade80;
-        --warn: #fbbf24;
+        --bg: #f5f6f8;
+        --panel: #ffffff;
+        --line: #e5e7eb;
+        --line-soft: #f1f3f5;
+        --text: #111827;
+        --muted: #6b7280;
+        --accent: #4f46e5;
+        --accent-soft: #eef2ff;
+        --danger: #dc2626;
+        --danger-soft: #fef2f2;
+        --warn: #d97706;
+        --warn-soft: #fffbeb;
+        --success: #059669;
+        --success-soft: #ecfdf5;
+        --shadow:
+          0 1px 2px rgba(16, 24, 40, 0.04),
+          0 1px 3px rgba(16, 24, 40, 0.05);
       }
       * {
         box-sizing: border-box;
@@ -23,53 +31,123 @@
         background: var(--bg);
         color: var(--text);
         font-family:
-          ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+          "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+          sans-serif;
         margin: 0;
-        padding: 24px;
-        max-width: 920px;
+        padding: 28px 24px 56px;
+        max-width: 1400px;
         margin-inline: auto;
+        line-height: 1.5;
+      }
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 24px;
+        margin-bottom: 24px;
+        padding-bottom: 20px;
+        border-bottom: 1px solid var(--line);
+        flex-wrap: wrap;
+      }
+      .topbar .brand {
+        flex: 1;
+        min-width: 280px;
+      }
+      .topbar .actions {
+        display: flex;
+        gap: 8px;
+        align-items: center;
       }
       h1 {
         margin: 0 0 4px;
-        font-size: 28px;
+        font-size: 24px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
       }
       h2 {
-        margin: 0 0 12px;
-        font-size: 16px;
+        margin: 0 0 14px;
+        font-size: 12px;
+        font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.08em;
         color: var(--muted);
+        display: flex;
+        align-items: center;
+        gap: 8px;
       }
       p.lede {
         color: var(--muted);
-        margin: 4px 0 24px;
+        margin: 0;
+        font-size: 14px;
+      }
+      .main-grid {
+        display: grid;
+        grid-template-columns: 340px 1fr;
+        gap: 16px;
+        align-items: start;
+      }
+      .sidebar {
+        position: sticky;
+        top: 16px;
+      }
+      .right-col {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+      .content-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+      }
+      @media (max-width: 1024px) {
+        .main-grid {
+          grid-template-columns: 1fr;
+        }
+        .sidebar {
+          position: static;
+        }
+      }
+      @media (max-width: 720px) {
+        .content-grid {
+          grid-template-columns: 1fr;
+        }
       }
       section {
         background: var(--panel);
         border: 1px solid var(--line);
         border-radius: 12px;
-        padding: 20px;
-        margin-bottom: 16px;
+        padding: 22px;
+        box-shadow: var(--shadow);
+        display: flex;
+        flex-direction: column;
       }
       label {
         display: block;
-        margin: 8px 0 4px;
+        margin: 10px 0 6px;
         font-size: 13px;
-        color: var(--muted);
+        font-weight: 500;
+        color: var(--text);
       }
       input[type="text"] {
         width: 100%;
-        background: #0b0d10;
+        background: var(--panel);
         color: var(--text);
         border: 1px solid var(--line);
         border-radius: 8px;
-        padding: 10px 12px;
-        font-family: ui-monospace, "SF Mono", Monaco, "Cascadia Code", monospace;
+        padding: 9px 12px;
+        font-family:
+          ui-monospace, "SF Mono", Monaco, "Cascadia Code", monospace;
         font-size: 13px;
+        transition: border-color 0.15s, box-shadow 0.15s;
+      }
+      input[type="text"]::placeholder {
+        color: #9ca3af;
       }
       input[type="text"]:focus {
-        outline: 2px solid var(--accent);
-        outline-offset: 1px;
+        outline: none;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px var(--accent-soft);
       }
       .btn-row {
         display: flex;
@@ -82,215 +160,263 @@
         color: var(--text);
         border: 1px solid var(--line);
         border-radius: 8px;
-        padding: 10px 14px;
-        font-size: 14px;
+        padding: 9px 14px;
+        font-size: 13px;
+        font-weight: 500;
+        font-family: inherit;
         cursor: pointer;
-        transition: border-color 0.15s;
+        transition: all 0.15s;
       }
       button:hover {
-        border-color: var(--accent);
+        border-color: #d1d5db;
+        background: #f9fafb;
       }
       button.primary {
         background: var(--accent);
         color: #fff;
         border-color: var(--accent);
       }
+      button.primary:hover {
+        background: #4338ca;
+        border-color: #4338ca;
+      }
       button.danger {
-        border-color: var(--danger);
         color: var(--danger);
+        border-color: #fecaca;
+        background: var(--danger-soft);
       }
       button.danger:hover {
-        background: rgba(255, 92, 122, 0.1);
+        background: #fee2e2;
+        border-color: #fca5a5;
       }
       button.warn {
-        border-color: var(--warn);
         color: var(--warn);
+        border-color: #fde68a;
+        background: var(--warn-soft);
       }
       button.warn:hover {
-        background: rgba(251, 191, 36, 0.1);
+        background: #fef3c7;
+        border-color: #fcd34d;
       }
       #status {
-        margin-top: 12px;
+        margin-top: 14px;
+        padding: 10px 12px;
+        border-radius: 8px;
+        background: var(--line-soft);
         font-family: ui-monospace, monospace;
-        font-size: 13px;
+        font-size: 12px;
         color: var(--muted);
         white-space: pre-wrap;
       }
       #status.ok {
+        background: var(--success-soft);
         color: var(--success);
       }
       #status.err {
+        background: var(--danger-soft);
         color: var(--danger);
       }
+      .log-wrap {
+        display: flex;
+        justify-content: center;
+      }
       .log {
-        margin-top: 16px;
-        background: #08090b;
+        width: 100%;
+        background: var(--panel);
         border: 1px solid var(--line);
-        border-radius: 8px;
-        padding: 12px;
+        border-radius: 12px;
+        padding: 16px 20px;
         font-family: ui-monospace, monospace;
         font-size: 12px;
-        max-height: 200px;
+        max-height: 220px;
         overflow-y: auto;
+        color: var(--text);
+        box-shadow: var(--shadow);
+      }
+      .log:empty::before {
+        content: "Activity log — events will appear here as you interact.";
         color: var(--muted);
+        font-style: italic;
       }
       .log .ts {
-        color: #4a5160;
+        color: var(--muted);
+        margin-right: 4px;
+      }
+      .log > div {
+        padding: 2px 0;
       }
       .pill {
-        display: inline-block;
+        display: inline-flex;
+        align-items: center;
         padding: 2px 8px;
-        font-size: 11px;
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
         border-radius: 999px;
-        background: var(--line);
+        background: var(--line-soft);
         color: var(--muted);
-        margin-left: 6px;
       }
       .pill.ok {
-        background: rgba(74, 222, 128, 0.15);
+        background: var(--success-soft);
         color: var(--success);
       }
       .grid {
         display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 12px;
+        grid-template-columns: 1fr;
+        gap: 4px;
       }
-      @media (max-width: 600px) {
-        .grid {
-          grid-template-columns: 1fr;
-        }
+      .helper {
+        color: var(--muted);
+        font-size: 13px;
+        margin: 0 0 4px;
       }
       code {
-        background: #08090b;
+        background: var(--line-soft);
         padding: 2px 6px;
         border-radius: 4px;
         font-size: 13px;
+        font-family:
+          ui-monospace, "SF Mono", Monaco, "Cascadia Code", monospace;
       }
       .footer {
         text-align: center;
         color: var(--muted);
         font-size: 12px;
         margin-top: 24px;
+        max-width: 800px;
+        margin-inline: auto;
       }
     </style>
   </head>
   <body>
-    <h1>Crashscope · Test Harness</h1>
-    <p class="lede">
-      Generate matched Sentry errors + PostHog sessions so the crashscope CLI
-      has something to triage.
-    </p>
+    <header class="topbar">
+      <div class="brand">
+        <h1>Crashscope · Test Harness</h1>
+        <p class="lede">
+          Generate matched Sentry errors and PostHog sessions so the crashscope
+          CLI has something to triage.
+        </p>
+      </div>
+      <div class="actions">
+        <button class="primary" onclick="runFlow()" title="Run a realistic end-to-end scenario: click → input → submit → navigate → rage click → crash">
+          Run end-to-end scenario →
+        </button>
+      </div>
+    </header>
 
-    <section>
-      <h2>1 · Configuration</h2>
-      <div class="grid">
-        <div>
-          <label for="dsn">Sentry DSN</label>
+    <div class="main-grid">
+      <aside class="sidebar">
+        <section>
+          <h2>Configuration</h2>
+          <div class="grid">
+            <div>
+              <label for="dsn">Sentry DSN</label>
+              <input
+                id="dsn"
+                type="text"
+                placeholder="https://abc...@oXXX.ingest.sentry.io/YYYYY"
+              />
+            </div>
+            <div>
+              <label for="phk">PostHog Project API Key (phc_…)</label>
+              <input
+                id="phk"
+                type="text"
+                placeholder="phc_xxxxxxxxxxxxxxxxxxxx"
+              />
+            </div>
+            <div>
+              <label for="phh">PostHog Host</label>
+              <input id="phh" type="text" value="https://us.i.posthog.com" />
+            </div>
+            <div>
+              <label for="uid">User ID (Sentry + PostHog)</label>
+              <input id="uid" type="text" value="test-user-1" />
+            </div>
+          </div>
+          <div class="btn-row">
+            <button class="primary" onclick="saveAndInit()">
+              Save &amp; Initialize
+            </button>
+            <button onclick="clearConfig()">Clear</button>
+          </div>
+          <div id="status">Not initialized.</div>
+        </section>
+      </aside>
+
+      <div class="right-col">
+        <div class="content-grid">
+          <section>
+          <h2>
+            Trigger Errors
+            <span class="pill" id="sentry-pill">Sentry</span>
+          </h2>
+          <p class="helper">
+            Each click captures an error in Sentry tagged with the configured
+            user ID.
+          </p>
+          <div class="btn-row">
+            <button class="danger" onclick="throwTypeError()">TypeError</button>
+            <button class="danger" onclick="throwReferenceError()">
+              ReferenceError
+            </button>
+            <button class="danger" onclick="throwRangeError()">
+              RangeError
+            </button>
+            <button class="danger" onclick="throwCustom()">Custom Error</button>
+            <button class="danger" onclick="throwAsync()">Async Error</button>
+            <button class="danger" onclick="unhandledRejection()">
+              Unhandled Rejection
+            </button>
+            <button class="warn" onclick="captureMessage()">
+              Capture Warning
+            </button>
+            <button class="warn" onclick="fetch404()">Fetch 404</button>
+          </div>
+        </section>
+
+        <section>
+          <h2>
+            Simulate User Interaction
+            <span class="pill" id="posthog-pill">PostHog</span>
+          </h2>
+          <p class="helper">
+            PostHog auto-captures clicks, inputs, and page views. Build a
+            session before triggering an error.
+          </p>
+          <div class="btn-row">
+            <button data-action="cta">Primary CTA</button>
+            <button data-action="secondary">Secondary CTA</button>
+            <button data-action="cancel">Cancel</button>
+            <button data-action="submit">Submit</button>
+          </div>
+          <label for="form-input">Test input field</label>
           <input
-            id="dsn"
+            id="form-input"
             type="text"
-            placeholder="https://abc...@oXXX.ingest.sentry.io/YYYYY"
+            placeholder="Type to fire input events"
           />
+          <div class="btn-row">
+            <button onclick="fakeNavigate('/checkout')">
+              Navigate /checkout
+            </button>
+            <button onclick="fakeNavigate('/account')">
+              Navigate /account
+            </button>
+            <button onclick="rageClickArea()">Rage click (5× fast)</button>
+            <button onclick="manualEvent()">Manual capture()</button>
+          </div>
+        </section>
         </div>
-        <div>
-          <label for="phk">PostHog Project API Key (phc_…)</label>
-          <input
-            id="phk"
-            type="text"
-            placeholder="phc_xxxxxxxxxxxxxxxxxxxx"
-          />
-        </div>
-        <div>
-          <label for="phh">PostHog Host</label>
-          <input
-            id="phh"
-            type="text"
-            value="https://us.i.posthog.com"
-          />
-        </div>
-        <div>
-          <label for="uid">User ID (shared between Sentry + PostHog)</label>
-          <input id="uid" type="text" value="test-user-1" />
+        <div class="log-wrap">
+          <div class="log" id="log"></div>
         </div>
       </div>
-      <div class="btn-row">
-        <button class="primary" onclick="saveAndInit()">
-          Save &amp; Initialize
-        </button>
-        <button onclick="clearConfig()">Clear saved config</button>
-      </div>
-      <div id="status">Not initialized.</div>
-    </section>
-
-    <section>
-      <h2>2 · Trigger Errors <span class="pill" id="sentry-pill">Sentry</span></h2>
-      <div class="btn-row">
-        <button class="danger" onclick="throwTypeError()">TypeError</button>
-        <button class="danger" onclick="throwReferenceError()">
-          ReferenceError
-        </button>
-        <button class="danger" onclick="throwRangeError()">RangeError</button>
-        <button class="danger" onclick="throwCustom()">Custom Error</button>
-        <button class="danger" onclick="throwAsync()">Async Error</button>
-        <button class="danger" onclick="unhandledRejection()">
-          Unhandled Rejection
-        </button>
-        <button class="warn" onclick="captureMessage()">
-          Capture Warning Message
-        </button>
-        <button class="warn" onclick="fetch404()">Fetch 404</button>
-      </div>
-    </section>
-
-    <section>
-      <h2>
-        3 · Simulate User Interaction <span class="pill" id="posthog-pill">PostHog</span>
-      </h2>
-      <p style="color: var(--muted); font-size: 13px; margin-top: 0">
-        PostHog auto-captures clicks, inputs, and page views. Click around to
-        build a session.
-      </p>
-      <div class="btn-row">
-        <button data-action="cta">Primary CTA</button>
-        <button data-action="secondary">Secondary CTA</button>
-        <button data-action="cancel">Cancel</button>
-        <button data-action="submit">Submit</button>
-      </div>
-      <label for="form-input" style="margin-top: 16px">Test input field</label>
-      <input
-        id="form-input"
-        type="text"
-        placeholder="Type something to fire input events"
-      />
-      <div class="btn-row" style="margin-top: 12px">
-        <button onclick="fakeNavigate('/checkout')">Navigate /checkout</button>
-        <button onclick="fakeNavigate('/account')">Navigate /account</button>
-        <button onclick="rageClickArea()">
-          Rage click area (5× fast clicks)
-        </button>
-        <button onclick="manualEvent()">Manual posthog.capture()</button>
-      </div>
-    </section>
-
-    <section>
-      <h2>4 · Combined Flow (realistic test)</h2>
-      <p style="color: var(--muted); font-size: 13px; margin-top: 0">
-        Simulates: user lands → clicks around → fills form → app crashes. The
-        crashscope CLI should produce a triage report linking the error to this
-        session.
-      </p>
-      <div class="btn-row">
-        <button class="primary" onclick="runFlow()">
-          Run end-to-end scenario
-        </button>
-      </div>
-    </section>
-
-    <div class="log" id="log"></div>
+    </div>
 
     <p class="footer">
-      Open browser DevTools → Network to confirm events are reaching Sentry /
-      PostHog. Wait ~30s before running crashscope so the data propagates.
+      Open DevTools → Network to confirm events reach Sentry and PostHog. Wait
+      ~30s before running crashscope so data propagates.
     </p>
 
     <!-- Sentry browser SDK -->
@@ -573,6 +699,27 @@
       const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
       loadSavedConfig();
+
+      // Persist every keystroke in the config inputs so values survive
+      // page reloads even when the user never clicks "Save & Initialize".
+      ["dsn", "phk", "phh", "uid"].forEach((id) => {
+        $(id).addEventListener("input", saveConfig);
+      });
+
+      // Echo data-action button clicks into the log so users see something
+      // happened (the actual event goes to PostHog via autocapture).
+      document.querySelectorAll("button[data-action]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          if (!initialized) return;
+          log(`Clicked: ${btn.textContent.trim()} (data-action=${btn.dataset.action})`);
+        });
+      });
+
+      // Same for the test input — log on change so users see PostHog captured it.
+      $("form-input").addEventListener("change", (e) => {
+        if (!initialized) return;
+        log(`Input changed: "${e.target.value}"`);
+      });
     </script>
   </body>
 </html>
