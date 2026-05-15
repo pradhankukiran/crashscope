@@ -1,11 +1,19 @@
 /**
- * Adapter matrix — a grid of cards advertising the four error trackers and
- * two session-replay providers crashscope supports out of the box.
+ * Adapter matrix — grid of cards listing the four error trackers and two
+ * session-replay providers crashscope supports out of the box.
  *
- * Each card has the provider name, role, and a `status` line; we keep them
- * label-only (no logos) to avoid the legal complications of redistributing
+ * Label-only (no logos) to avoid the legal complications of redistributing
  * third-party trademarks inside the package.
  */
+
+import { Badge } from "@/components/ui/badge";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 
 type Role = "error" | "session";
 
@@ -49,45 +57,54 @@ const ADAPTERS: Adapter[] = [
 ];
 
 function RoleBadge({ role }: { role: Role }): JSX.Element {
-  const label = role === "error" ? "Error tracker" : "Session replay";
-  const colour =
-    role === "error"
-      ? "bg-red-500/10 text-red-300 border-red-500/30"
-      : "bg-cyan-500/10 text-cyan-300 border-cyan-500/30";
-  return (
-    <span
-      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider ${colour}`}
+  return role === "error" ? (
+    <Badge
+      variant="outline"
+      className="border-red-200 bg-red-50 text-red-700"
     >
-      {label}
-    </span>
+      Error tracker
+    </Badge>
+  ) : (
+    <Badge
+      variant="outline"
+      className="border-sky-200 bg-sky-50 text-sky-700"
+    >
+      Session replay
+    </Badge>
   );
 }
 
 export function AdapterMatrix(): JSX.Element {
   return (
-    <section id="adapters" className="border-b border-ink-800">
+    <section id="adapters" className="border-b">
       <div className="mx-auto max-w-6xl px-6 py-20">
-        <h2 className="text-3xl font-bold tracking-tight text-center">
-          Bring your existing stack
-        </h2>
-        <p className="mt-3 text-center text-ink-400 max-w-2xl mx-auto">
-          Adapters live in <code className="text-brand-300">@crashscope/core</code>{" "}
-          and normalize each provider into a shared error and session shape.
-        </p>
-        <div className="mt-12 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="text-center">
+          <h2 className="text-3xl font-bold tracking-tight">
+            Bring your existing stack
+          </h2>
+          <p className="mx-auto mt-3 max-w-2xl text-muted-foreground">
+            Adapters live in{" "}
+            <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-sm text-primary">
+              @crashscope/core
+            </code>{" "}
+            and normalize each provider into a shared error and session shape.
+          </p>
+        </div>
+        <div className="mt-12 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {ADAPTERS.map((a) => (
-            <div
-              key={a.name}
-              className="rounded-lg border border-ink-800 bg-ink-900/40 p-5 hover:border-ink-600 transition-colors"
-            >
-              <div className="flex items-center justify-between gap-3">
-                <h3 className="text-lg font-semibold">{a.name}</h3>
-                <RoleBadge role={a.role} />
-              </div>
-              <p className="mt-3 text-sm text-ink-400 leading-relaxed">
-                {a.blurb}
-              </p>
-            </div>
+            <Card key={a.name} className="shadow-sm transition-shadow hover:shadow-md">
+              <CardHeader>
+                <div className="flex items-center justify-between gap-3">
+                  <CardTitle className="text-lg">{a.name}</CardTitle>
+                  <RoleBadge role={a.role} />
+                </div>
+              </CardHeader>
+              <CardContent>
+                <CardDescription className="leading-relaxed">
+                  {a.blurb}
+                </CardDescription>
+              </CardContent>
+            </Card>
           ))}
         </div>
       </div>

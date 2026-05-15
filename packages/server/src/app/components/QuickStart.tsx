@@ -1,14 +1,23 @@
 /**
- * QuickStart — three side-by-side code blocks (CLI, Slack, API) so visitors
- * can see how to invoke crashscope from any of the supported surfaces.
- *
- * We deliberately keep this as plain `<pre>` blocks rather than a JS-driven
- * tab switcher; the page is a marketing surface and all three modes fit
- * comfortably on desktop. On mobile they stack.
+ * QuickStart — shadcn Tabs (CLI / Slack / API) with monospace code blocks on
+ * a muted background. The same triage pipeline backs every surface; this
+ * section just shows how to invoke it from each.
  */
 
+import { MessageSquare, Terminal, Webhook } from "lucide-react";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+
 interface Snippet {
+  value: string;
   label: string;
+  icon: typeof Terminal;
   language: string;
   code: string;
   blurb: string;
@@ -16,7 +25,9 @@ interface Snippet {
 
 const SNIPPETS: Snippet[] = [
   {
+    value: "cli",
     label: "CLI",
+    icon: Terminal,
     language: "bash",
     code:
       "$ npm i -g crashscope\n" +
@@ -26,7 +37,9 @@ const SNIPPETS: Snippet[] = [
       "Install once, configure your providers interactively, then triage from any terminal.",
   },
   {
+    value: "slack",
     label: "Slack",
+    icon: MessageSquare,
     language: "text",
     code:
       "/triage\n" +
@@ -36,7 +49,9 @@ const SNIPPETS: Snippet[] = [
       "Add the Slack app, mount this server, and `/triage` from any channel.",
   },
   {
+    value: "api",
     label: "API",
+    icon: Webhook,
     language: "bash",
     code:
       "$ curl -H 'Authorization: Bearer $TOKEN' \\\n" +
@@ -48,35 +63,48 @@ const SNIPPETS: Snippet[] = [
 
 export function QuickStart(): JSX.Element {
   return (
-    <section id="quick-start" className="border-b border-ink-800">
+    <section id="quick-start" className="border-b">
       <div className="mx-auto max-w-6xl px-6 py-20">
-        <h2 className="text-3xl font-bold tracking-tight text-center">
-          Three surfaces, one pipeline
-        </h2>
-        <p className="mt-3 text-center text-ink-400 max-w-2xl mx-auto">
-          The same triage pipeline backs the CLI, the Slack bot, and the REST
-          API. Pick whichever surface fits your workflow.
-        </p>
-        <div className="mt-12 grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {SNIPPETS.map((s) => (
-            <div
-              key={s.label}
-              className="flex flex-col rounded-lg border border-ink-800 bg-ink-900/40 overflow-hidden"
-            >
-              <div className="border-b border-ink-800 px-4 py-2 flex items-center justify-between">
-                <span className="text-sm font-semibold">{s.label}</span>
-                <span className="text-[10px] font-mono uppercase text-ink-500">
-                  {s.language}
-                </span>
-              </div>
-              <pre className="code-block flex-1 m-0 rounded-none border-0">
-                <code>{s.code}</code>
-              </pre>
-              <div className="px-4 py-3 border-t border-ink-800 text-xs text-ink-400">
-                {s.blurb}
-              </div>
-            </div>
-          ))}
+        <div className="text-center">
+          <h2 className="text-3xl font-bold tracking-tight">
+            Three surfaces, one pipeline
+          </h2>
+          <p className="mx-auto mt-3 max-w-2xl text-muted-foreground">
+            The same triage pipeline backs the CLI, the Slack bot, and the REST
+            API. Pick whichever surface fits your workflow.
+          </p>
+        </div>
+        <div className="mt-12">
+          <Tabs defaultValue="cli" className="mx-auto max-w-3xl">
+            <TabsList className="grid w-full grid-cols-3">
+              {SNIPPETS.map((s) => (
+                <TabsTrigger key={s.value} value={s.value} className="gap-2">
+                  <s.icon className="h-4 w-4" />
+                  {s.label}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+            {SNIPPETS.map((s) => (
+              <TabsContent key={s.value} value={s.value} className="mt-4">
+                <Card>
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+                    <CardTitle className="text-sm font-medium">
+                      {s.label}
+                    </CardTitle>
+                    <span className="font-mono text-[10px] uppercase text-muted-foreground">
+                      {s.language}
+                    </span>
+                  </CardHeader>
+                  <CardContent className="flex flex-col gap-3">
+                    <pre className="overflow-x-auto rounded-md border bg-muted px-4 py-3 font-mono text-sm leading-relaxed text-foreground">
+                      <code>{s.code}</code>
+                    </pre>
+                    <CardDescription>{s.blurb}</CardDescription>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+            ))}
+          </Tabs>
         </div>
       </div>
     </section>

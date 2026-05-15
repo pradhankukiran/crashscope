@@ -1,9 +1,10 @@
 /**
- * Root layout — applies the dark-mode `html` class, ships the Tailwind
- * stylesheet, and wires next/font for the body and monospace stacks.
+ * Root layout — ships the Tailwind stylesheet and wires `next/font` for the
+ * Inter body font + JetBrains Mono for inline code/monospace blocks.
  *
- * `metadata` lives here (not in `page.tsx`) so social previews work for any
- * future sub-page that doesn't override it.
+ * The page is committed to a single (light) theme; we do not toggle a `dark`
+ * class on the `html` element. `metadata` lives here (not in `page.tsx`) so
+ * social previews work for any future sub-page that doesn't override it.
  */
 import type { Metadata, Viewport } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
@@ -63,7 +64,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#020617",
+  themeColor: "#ffffff",
   width: "device-width",
   initialScale: 1,
 };
@@ -74,12 +75,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }): JSX.Element {
   return (
-    <html
-      lang="en"
-      className={`${inter.variable} ${jetbrainsMono.variable} dark`}
-    >
+    <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable}`}>
       <body className="font-sans antialiased">
-        <div className="min-h-dvh flex flex-col">{children}</div>
+        <div className="flex min-h-dvh flex-col">{children}</div>
       </body>
     </html>
   );

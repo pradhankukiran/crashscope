@@ -1,8 +1,8 @@
 /**
- * Page footer: minimal links + colophon. Server component, no client state.
+ * Page footer — minimal colophon + link list. Server component, no state.
  */
 
-const LINKS: Array<{ label: string; href: string }> = [
+const LINKS: ReadonlyArray<{ label: string; href: string }> = [
   { label: "GitHub", href: "https://github.com/crashscope/crashscope" },
   { label: "API", href: "/api/health" },
   { label: "Docs", href: "https://github.com/crashscope/crashscope#readme" },
@@ -10,11 +10,11 @@ const LINKS: Array<{ label: string; href: string }> = [
 
 export function Footer(): JSX.Element {
   return (
-    <footer className="border-t border-ink-800">
-      <div className="mx-auto max-w-6xl px-6 py-10 flex flex-col sm:flex-row gap-4 items-center justify-between text-sm text-ink-500">
+    <footer className="border-t">
+      <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-6 py-10 text-sm text-muted-foreground sm:flex-row">
         <p>
           Crashscope is open source.{" "}
-          <span className="text-ink-400">
+          <span className="text-foreground">
             Built on @crashscope/core + Anthropic Claude.
           </span>
         </p>
@@ -23,7 +23,7 @@ export function Footer(): JSX.Element {
             <a
               key={l.href}
               href={l.href}
-              className="hover:text-ink-100 transition-colors"
+              className="transition-colors hover:text-foreground"
             >
               {l.label}
             </a>

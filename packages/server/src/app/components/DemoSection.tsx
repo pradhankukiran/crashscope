@@ -4,9 +4,10 @@
  * DemoSection — the "Try it now" block that glues {@link DemoForm} and
  * {@link TriageResults} together on the landing page.
  *
- * Owns the transient state (last report, last error, run telemetry) so the
- * surrounding page can stay a server component. The triage run itself happens
- * inside `DemoForm`; this component only routes the callbacks.
+ * Owns the transient state (last report, last error) so the surrounding page
+ * can stay a server component. The triage run itself happens inside
+ * `DemoForm`; this component just routes the callbacks and renders a card
+ * shell with a separator between the form and the results.
  *
  * On a successful run we auto-scroll to the results area so visitors don't
  * have to hunt for it on long pages. The scroll is throttled to once per
@@ -14,7 +15,19 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { AlertCircle } from "lucide-react";
 import type { TriageReport } from "@crashscope/core";
+
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Separator } from "@/components/ui/separator";
+
 import { DemoForm } from "./DemoForm";
 import { TriageResults } from "./TriageResults";
 
@@ -48,32 +61,40 @@ export function DemoSection(): JSX.Element {
   }, []);
 
   return (
-    <section id="try" className="border-b border-ink-800">
+    <section id="try" className="border-b bg-muted/30">
       <div className="mx-auto max-w-6xl px-6 py-20">
-        <h2 className="text-3xl font-bold tracking-tight text-center">
-          Try it now
-        </h2>
-        <p className="mt-3 text-center text-ink-400 max-w-2xl mx-auto">
-          Paste your credentials and run triage live. Nothing is stored on the
-          server — your keys leave your browser only for the duration of one
-          request.
-        </p>
+        <Card className="shadow-sm">
+          <CardHeader className="text-center">
+            <CardTitle className="text-3xl font-bold tracking-tight">
+              Try it now
+            </CardTitle>
+            <CardDescription className="mx-auto max-w-2xl text-base">
+              Paste your credentials and run triage live. Nothing is stored on
+              the server — your keys leave your browser only for the duration
+              of one request.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-8 pt-2">
+            <DemoForm onResult={handleResult} onError={handleError} />
 
-        <div className="mt-12">
-          <DemoForm onResult={handleResult} onError={handleError} />
-        </div>
-
-        {/* Results / error area */}
-        <div ref={resultsRef} className="mt-12 scroll-mt-8">
-          {errorMessage && !report ? (
-            <div className="rounded-md border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
-              {errorMessage}
-            </div>
-          ) : null}
-          {report ? (
-            <TriageResults report={report} onReset={handleReset} />
-          ) : null}
-        </div>
+            {(errorMessage && !report) || report ? (
+              <>
+                <Separator />
+                <div ref={resultsRef} className="scroll-mt-8">
+                  {errorMessage && !report ? (
+                    <Alert variant="destructive">
+                      <AlertCircle className="h-4 w-4" />
+                      <AlertDescription>{errorMessage}</AlertDescription>
+                    </Alert>
+                  ) : null}
+                  {report ? (
+                    <TriageResults report={report} onReset={handleReset} />
+                  ) : null}
+                </div>
+              </>
+            ) : null}
+          </CardContent>
+        </Card>
       </div>
     </section>
   );
