@@ -6,13 +6,14 @@ Next.js app for crashscope: marketing landing page, REST triage API, and Slack b
 
 ## What you get
 
-- `/` — marketing landing page.
+- `/` — marketing landing page, including a public **"Try it now"** form that lets any visitor run a triage live with their own credentials.
 - `GET /api/health` — uptime probe.
-- `GET /api/triage` — programmatic triage (bearer-authed).
+- `GET /api/triage` — programmatic triage (bearer-authed, uses server env).
+- `POST /api/triage` — public demo triage. No bearer; credentials and the Anthropic API key come from the request body. Powers the landing-page form.
 - `POST /api/slack/command` — `/triage` Slack slash command.
 - `POST /api/slack/events` — Slack URL verification + future event handlers.
 
-The triage pipeline runs inside `lib/triage.ts` and is shared by both the REST endpoint and the Slack bot, so behavior is identical across surfaces.
+The triage pipeline runs inside `lib/triage.ts` and is shared by both the REST endpoint and the Slack bot, so behavior is identical across surfaces. The public POST mode supplies its own `CrashscopeConfig` via the new `configOverride` parameter on `runTriage`.
 
 ## Local development
 
@@ -55,6 +56,8 @@ Required-vs-conditional gates are enforced by `lib/config.ts`; a missing variabl
 
 ## REST API
 
+### `GET /api/triage` — env-driven mode
+
 ```http
 GET /api/triage?since=24h&limit=25&severity=fatal,error
 Authorization: Bearer <CRASHSCOPE_API_TOKEN>
@@ -74,6 +77,32 @@ Responses:
 - `5xx` — adapter, auth, or pipeline failure. Body: `{ error, message, requestId }`.
 
 All responses set `Cache-Control: no-store` and an `X-Request-Id` header for log correlation.
+
+### `POST /api/triage` — public demo mode
+
+Used by the landing-page form. Intentionally unauthenticated: visitors paste their own credentials, the server uses them transiently for a single request, and nothing is persisted.
+
+```http
+POST /api/triage
+Content-Type: application/json
+```
+
+Body (validated with Zod, mirroring `crashscopeConfigSchema` from `@crashscope/core`):
+
+```jsonc
+{
+  "errorProvider": "sentry",
+  "sessionProvider": "posthog",
+  "credentials": {
+    "sentry":  { "token": "...", "org": "...", "project": "..." },
+    "posthog": { "apiKey": "...", "projectId": "...", "host": "https://us.i.posthog.com" }
+  },
+  "anthropic": { "apiKey": "sk-ant-..." },  // REQUIRED here
+  "opts": { "since": "24h", "limit": 5 }
+}
+```
+
+The `anthropic.apiKey` field is mandatory on this endpoint — the server never falls back to its own `ANTHROPIC_API_KEY` env var for the public demo.
 
 ## Slack setup
 
