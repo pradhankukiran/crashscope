@@ -2,72 +2,217 @@
 
 /**
  * DemoForm — the in-page triage form that powers the public landing-page
- * demo.
+ * demo, rebuilt on top of shadcn/ui + react-hook-form + zod.
  *
- * Behaviour:
- *  - All state lives in React + localStorage (`crashscope-demo-config`).
+ * Behaviour preserved from the original implementation:
+ *  - State persists to `localStorage` under `crashscope-demo-config`.
  *  - On submit, POSTs to `/api/triage` (same-origin, no Authorization header).
- *  - While running, disables the submit button and reports elapsed time to the
- *    parent via `onRunStateChange`.
- *  - On 200, hands the parsed `TriageReport` to `onResult`.
- *  - On any error (network, schema, server), calls `onError(message)`.
+ *  - While running, the submit button shows the elapsed time and the parent
+ *    receives run-state changes via `onRunStateChange`.
+ *  - On 200, the parsed report is handed to `onResult`.
+ *  - On any error, the message goes to `onError` and is also shown inline.
  *
- * Credentials are stored in the browser only. The notice under the form
- * documents this clearly. We deliberately persist the Anthropic key too —
- * the test app already does this for provider keys; expecting visitors to
- * paste it on every run would be hostile UX.
+ * Credentials live in the browser only. The disclaimer at the bottom makes
+ * that explicit.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useForm } from "react-hook-form";
+import { z } from "zod";
+import {
+  AlertCircle,
+  Eye,
+  EyeOff,
+  Loader2,
+  Lock,
+} from "lucide-react";
 import type { TriageReport } from "@crashscope/core";
+
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  Form,
+  FormControl,
+  FormDescription,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
+import { Input } from "@/components/ui/input";
+import { Separator } from "@/components/ui/separator";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 // ----- Types ---------------------------------------------------------------
 
-type ErrorProvider = "sentry" | "rollbar" | "bugsnag" | "honeybadger";
-type SessionProvider = "posthog" | "logrocket";
-type SinceWindow = "1h" | "6h" | "24h" | "7d" | "14d" | "30d";
+const ERROR_PROVIDERS = [
+  "sentry",
+  "rollbar",
+  "bugsnag",
+  "honeybadger",
+] as const;
+const SESSION_PROVIDERS = ["posthog", "logrocket"] as const;
+const SINCE_VALUES = ["1h", "6h", "24h", "7d", "14d", "30d"] as const;
 
-interface SentryCreds {
-  token: string;
-  org: string;
-  project: string;
-}
-interface RollbarCreds {
-  readToken: string;
-  project: string;
-}
-interface BugsnagCreds {
-  token: string;
-  organizationId: string;
-  projectId: string;
-}
-interface HoneybadgerCreds {
-  token: string;
-  projectId: string;
-}
-interface PostHogCreds {
-  apiKey: string;
-  projectId: string;
-  host: string;
-}
-interface LogRocketCreds {
-  apiKey: string;
-  appSlug: string;
-}
+type ErrorProvider = (typeof ERROR_PROVIDERS)[number];
+type SessionProvider = (typeof SESSION_PROVIDERS)[number];
+type SinceWindow = (typeof SINCE_VALUES)[number];
 
-interface FormState {
-  anthropicApiKey: string;
-  errorProvider: ErrorProvider;
-  sessionProvider: SessionProvider;
-  sentry: SentryCreds;
-  rollbar: RollbarCreds;
-  bugsnag: BugsnagCreds;
-  honeybadger: HoneybadgerCreds;
-  posthog: PostHogCreds;
-  logrocket: LogRocketCreds;
-  since: SinceWindow;
-  limit: number;
-}
+/**
+ * Zod schema for the demo form. We validate the entire snapshot — fields for
+ * inactive providers are kept around (so we can restore them after toggling)
+ * but only the active provider's group must be non-empty.
+ *
+ * `superRefine` carries the conditional-required logic so the field-level
+ * messages still attach to the right input.
+ */
+const formSchema = z
+  .object({
+    anthropicApiKey: z.string().min(1, "Anthropic API key is required."),
+    errorProvider: z.enum(ERROR_PROVIDERS),
+    sessionProvider: z.enum(SESSION_PROVIDERS),
+    sentry: z.object({
+      token: z.string(),
+      org: z.string(),
+      project: z.string(),
+    }),
+    rollbar: z.object({
+      readToken: z.string(),
+      project: z.string(),
+    }),
+    bugsnag: z.object({
+      token: z.string(),
+      organizationId: z.string(),
+      projectId: z.string(),
+    }),
+    honeybadger: z.object({
+      token: z.string(),
+      projectId: z.string(),
+    }),
+    posthog: z.object({
+      apiKey: z.string(),
+      projectId: z.string(),
+      host: z.string(),
+    }),
+    logrocket: z.object({
+      apiKey: z.string(),
+      appSlug: z.string(),
+    }),
+    since: z.enum(SINCE_VALUES),
+    limit: z.coerce.number().int().min(1).max(25),
+  })
+  .superRefine((data, ctx) => {
+    switch (data.errorProvider) {
+      case "sentry":
+        if (!data.sentry.token)
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["sentry", "token"],
+            message: "Required.",
+          });
+        if (!data.sentry.org)
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["sentry", "org"],
+            message: "Required.",
+          });
+        if (!data.sentry.project)
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["sentry", "project"],
+            message: "Required.",
+          });
+        break;
+      case "rollbar":
+        if (!data.rollbar.readToken)
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["rollbar", "readToken"],
+            message: "Required.",
+          });
+        break;
+      case "bugsnag":
+        if (!data.bugsnag.token)
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["bugsnag", "token"],
+            message: "Required.",
+          });
+        if (!data.bugsnag.organizationId)
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["bugsnag", "organizationId"],
+            message: "Required.",
+          });
+        if (!data.bugsnag.projectId)
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["bugsnag", "projectId"],
+            message: "Required.",
+          });
+        break;
+      case "honeybadger":
+        if (!data.honeybadger.token)
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["honeybadger", "token"],
+            message: "Required.",
+          });
+        if (!data.honeybadger.projectId)
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["honeybadger", "projectId"],
+            message: "Required.",
+          });
+        break;
+    }
+    switch (data.sessionProvider) {
+      case "posthog":
+        if (!data.posthog.apiKey)
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["posthog", "apiKey"],
+            message: "Required.",
+          });
+        if (!data.posthog.projectId)
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["posthog", "projectId"],
+            message: "Required.",
+          });
+        break;
+      case "logrocket":
+        if (!data.logrocket.apiKey)
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["logrocket", "apiKey"],
+            message: "Required.",
+          });
+        if (!data.logrocket.appSlug)
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["logrocket", "appSlug"],
+            message: "Required.",
+          });
+        break;
+    }
+  });
+
+type FormValues = z.infer<typeof formSchema>;
 
 export interface DemoFormProps {
   onResult: (report: TriageReport) => void;
@@ -79,7 +224,7 @@ export interface DemoFormProps {
 
 const STORAGE_KEY = "crashscope-demo-config";
 
-const DEFAULT_STATE: FormState = {
+const DEFAULT_VALUES: FormValues = {
   anthropicApiKey: "",
   errorProvider: "sentry",
   sessionProvider: "posthog",
@@ -97,52 +242,67 @@ const DEFAULT_STATE: FormState = {
   limit: 5,
 };
 
-/**
- * Defensively merge persisted state into defaults: persisted shape may be
- * older / partial across deploys. We only copy known keys.
- */
-function mergeState(
-  defaults: FormState,
-  stored: Partial<FormState> | null,
-): FormState {
-  if (!stored) return defaults;
-  return {
-    anthropicApiKey:
-      typeof stored.anthropicApiKey === "string"
-        ? stored.anthropicApiKey
-        : defaults.anthropicApiKey,
-    errorProvider:
-      stored.errorProvider && isErrorProvider(stored.errorProvider)
-        ? stored.errorProvider
-        : defaults.errorProvider,
-    sessionProvider:
-      stored.sessionProvider && isSessionProvider(stored.sessionProvider)
-        ? stored.sessionProvider
-        : defaults.sessionProvider,
-    sentry: { ...defaults.sentry, ...(stored.sentry ?? {}) },
-    rollbar: { ...defaults.rollbar, ...(stored.rollbar ?? {}) },
-    bugsnag: { ...defaults.bugsnag, ...(stored.bugsnag ?? {}) },
-    honeybadger: { ...defaults.honeybadger, ...(stored.honeybadger ?? {}) },
-    posthog: { ...defaults.posthog, ...(stored.posthog ?? {}) },
-    logrocket: { ...defaults.logrocket, ...(stored.logrocket ?? {}) },
-    since: stored.since && isSince(stored.since) ? stored.since : defaults.since,
-    limit:
-      typeof stored.limit === "number" && stored.limit >= 1 && stored.limit <= 25
-        ? Math.floor(stored.limit)
-        : defaults.limit,
-  };
+function isErrorProvider(v: unknown): v is ErrorProvider {
+  return typeof v === "string" && (ERROR_PROVIDERS as readonly string[]).includes(v);
+}
+function isSessionProvider(v: unknown): v is SessionProvider {
+  return typeof v === "string" && (SESSION_PROVIDERS as readonly string[]).includes(v);
+}
+function isSince(v: unknown): v is SinceWindow {
+  return typeof v === "string" && (SINCE_VALUES as readonly string[]).includes(v);
 }
 
-function isErrorProvider(v: string): v is ErrorProvider {
-  return (
-    v === "sentry" || v === "rollbar" || v === "bugsnag" || v === "honeybadger"
-  );
-}
-function isSessionProvider(v: string): v is SessionProvider {
-  return v === "posthog" || v === "logrocket";
-}
-function isSince(v: string): v is SinceWindow {
-  return ["1h", "6h", "24h", "7d", "14d", "30d"].includes(v);
+/**
+ * Merge a (potentially partial) stored snapshot back into defaults. Older
+ * deploys may have written a partial shape; we only keep keys that match the
+ * current schema.
+ */
+function mergeStored(stored: unknown): FormValues {
+  if (!stored || typeof stored !== "object") return DEFAULT_VALUES;
+  const s = stored as Record<string, unknown>;
+  return {
+    anthropicApiKey:
+      typeof s["anthropicApiKey"] === "string"
+        ? s["anthropicApiKey"]
+        : DEFAULT_VALUES.anthropicApiKey,
+    errorProvider: isErrorProvider(s["errorProvider"])
+      ? s["errorProvider"]
+      : DEFAULT_VALUES.errorProvider,
+    sessionProvider: isSessionProvider(s["sessionProvider"])
+      ? s["sessionProvider"]
+      : DEFAULT_VALUES.sessionProvider,
+    sentry: {
+      ...DEFAULT_VALUES.sentry,
+      ...((s["sentry"] as Partial<FormValues["sentry"]> | undefined) ?? {}),
+    },
+    rollbar: {
+      ...DEFAULT_VALUES.rollbar,
+      ...((s["rollbar"] as Partial<FormValues["rollbar"]> | undefined) ?? {}),
+    },
+    bugsnag: {
+      ...DEFAULT_VALUES.bugsnag,
+      ...((s["bugsnag"] as Partial<FormValues["bugsnag"]> | undefined) ?? {}),
+    },
+    honeybadger: {
+      ...DEFAULT_VALUES.honeybadger,
+      ...((s["honeybadger"] as Partial<FormValues["honeybadger"]> | undefined) ??
+        {}),
+    },
+    posthog: {
+      ...DEFAULT_VALUES.posthog,
+      ...((s["posthog"] as Partial<FormValues["posthog"]> | undefined) ?? {}),
+    },
+    logrocket: {
+      ...DEFAULT_VALUES.logrocket,
+      ...((s["logrocket"] as Partial<FormValues["logrocket"]> | undefined) ??
+        {}),
+    },
+    since: isSince(s["since"]) ? s["since"] : DEFAULT_VALUES.since,
+    limit:
+      typeof s["limit"] === "number" && s["limit"] >= 1 && s["limit"] <= 25
+        ? Math.floor(s["limit"])
+        : DEFAULT_VALUES.limit,
+  };
 }
 
 // ----- Component ----------------------------------------------------------
@@ -152,44 +312,53 @@ export function DemoForm({
   onError,
   onRunStateChange,
 }: DemoFormProps): JSX.Element {
-  const [state, setState] = useState<FormState>(DEFAULT_STATE);
+  const form = useForm<FormValues>({
+    resolver: zodResolver(formSchema),
+    defaultValues: DEFAULT_VALUES,
+    mode: "onSubmit",
+  });
+
   const [hydrated, setHydrated] = useState(false);
   const [running, setRunning] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);
   const [formError, setFormError] = useState<string | null>(null);
+  const [showAnthropicKey, setShowAnthropicKey] = useState(false);
   const tickRef = useRef<number | null>(null);
 
-  // Hydrate from localStorage once on mount.
+  // ----- Hydrate from localStorage once. -----------------------------------
+
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw) as Partial<FormState>;
-        setState((prev) => mergeState(prev, parsed));
-      }
+      if (raw) form.reset(mergeStored(JSON.parse(raw)));
     } catch {
-      // Ignore — corrupt storage just means we use defaults.
+      // Corrupt storage just falls back to defaults.
     }
     setHydrated(true);
+    // We deliberately run this once; the form instance is stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Persist on every change *after* hydration so we don't immediately
-  // overwrite stored state with defaults on first render.
+  // Persist on every value change AFTER hydration so we don't blow away
+  // stored state with the default snapshot on first render.
   useEffect(() => {
     if (!hydrated) return;
-    try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    } catch {
-      // Quota or privacy mode — silently ignore.
-    }
-  }, [hydrated, state]);
+    const subscription = form.watch((value) => {
+      try {
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(value));
+      } catch {
+        // Quota or privacy mode: ignore.
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, [form, hydrated]);
 
-  // Emit run-state changes (debounced trivially via tick).
+  // Surface run state to the parent.
   useEffect(() => {
     onRunStateChange?.({ running, elapsedMs });
   }, [onRunStateChange, running, elapsedMs]);
 
-  // Elapsed-time ticker.
+  // Elapsed-time ticker while running.
   useEffect(() => {
     if (!running) {
       if (tickRef.current !== null) {
@@ -211,101 +380,53 @@ export function DemoForm({
     };
   }, [running]);
 
-  // ----- Validation -------------------------------------------------------
-
-  const validationError = useMemo<string | null>(() => {
-    if (!state.anthropicApiKey.trim()) return "Anthropic API key is required.";
-    switch (state.errorProvider) {
-      case "sentry": {
-        const c = state.sentry;
-        if (!c.token || !c.org || !c.project)
-          return "Fill in Sentry token, org, and project.";
-        break;
-      }
-      case "rollbar": {
-        if (!state.rollbar.readToken)
-          return "Fill in Rollbar read token.";
-        break;
-      }
-      case "bugsnag": {
-        const c = state.bugsnag;
-        if (!c.token || !c.organizationId || !c.projectId)
-          return "Fill in Bugsnag token, organization id, and project id.";
-        break;
-      }
-      case "honeybadger": {
-        const c = state.honeybadger;
-        if (!c.token || !c.projectId)
-          return "Fill in Honeybadger token and project id.";
-        break;
-      }
-    }
-    switch (state.sessionProvider) {
-      case "posthog": {
-        const c = state.posthog;
-        if (!c.apiKey || !c.projectId)
-          return "Fill in PostHog API key and project id.";
-        break;
-      }
-      case "logrocket": {
-        const c = state.logrocket;
-        if (!c.apiKey || !c.appSlug)
-          return "Fill in LogRocket API key and app slug.";
-        break;
-      }
-    }
-    return null;
-  }, [state]);
+  const errorProvider = form.watch("errorProvider");
+  const sessionProvider = form.watch("sessionProvider");
 
   // ----- Submit -----------------------------------------------------------
 
-  const handleSubmit = useCallback(
-    async (e: React.FormEvent<HTMLFormElement>) => {
-      e.preventDefault();
-      if (validationError) {
-        setFormError(validationError);
-        return;
-      }
+  const onSubmit = useCallback(
+    async (values: FormValues): Promise<void> => {
       setFormError(null);
 
       const credentials: Record<string, unknown> = {};
-      switch (state.errorProvider) {
+      switch (values.errorProvider) {
         case "sentry":
-          credentials["sentry"] = state.sentry;
+          credentials["sentry"] = values.sentry;
           break;
         case "rollbar":
-          credentials["rollbar"] = state.rollbar.project.trim()
-            ? state.rollbar
-            : { readToken: state.rollbar.readToken };
+          credentials["rollbar"] = values.rollbar.project.trim()
+            ? values.rollbar
+            : { readToken: values.rollbar.readToken };
           break;
         case "bugsnag":
-          credentials["bugsnag"] = state.bugsnag;
+          credentials["bugsnag"] = values.bugsnag;
           break;
         case "honeybadger":
-          credentials["honeybadger"] = state.honeybadger;
+          credentials["honeybadger"] = values.honeybadger;
           break;
       }
-      switch (state.sessionProvider) {
+      switch (values.sessionProvider) {
         case "posthog":
           credentials["posthog"] = {
-            apiKey: state.posthog.apiKey,
-            projectId: state.posthog.projectId,
-            ...(state.posthog.host ? { host: state.posthog.host } : {}),
+            apiKey: values.posthog.apiKey,
+            projectId: values.posthog.projectId,
+            ...(values.posthog.host ? { host: values.posthog.host } : {}),
           };
           break;
         case "logrocket":
-          credentials["logrocket"] = state.logrocket;
+          credentials["logrocket"] = values.logrocket;
           break;
       }
 
       const body = {
-        errorProvider: state.errorProvider,
-        sessionProvider: state.sessionProvider,
+        errorProvider: values.errorProvider,
+        sessionProvider: values.sessionProvider,
         credentials,
-        anthropic: { apiKey: state.anthropicApiKey },
+        anthropic: { apiKey: values.anthropicApiKey },
         opts: {
-          since: state.since,
-          limit: state.limit,
+          since: values.since,
+          limit: values.limit,
         },
       };
 
@@ -321,12 +442,15 @@ export function DemoForm({
         try {
           payload = JSON.parse(text);
         } catch {
-          // Non-JSON body — surface raw text.
+          // Non-JSON body — surface raw text below.
         }
         if (!res.ok) {
           const message =
-            payload && typeof payload === "object" && payload !== null &&
-            "message" in payload && typeof (payload as { message: unknown }).message === "string"
+            payload &&
+            typeof payload === "object" &&
+            payload !== null &&
+            "message" in payload &&
+            typeof (payload as { message: unknown }).message === "string"
               ? (payload as { message: string }).message
               : `Request failed with status ${res.status}.`;
           setFormError(message);
@@ -335,451 +459,505 @@ export function DemoForm({
         }
         onResult(payload as TriageReport);
       } catch (err) {
-        const message =
-          err instanceof Error ? err.message : "Network error.";
+        const message = err instanceof Error ? err.message : "Network error.";
         setFormError(message);
         onError(message);
       } finally {
         setRunning(false);
       }
     },
-    [onError, onResult, state, validationError],
+    [onError, onResult],
   );
 
   // ----- Render -----------------------------------------------------------
 
-  const elapsedSeconds = (elapsedMs / 1000).toFixed(1);
-  const submitDisabled = running || validationError !== null;
+  const elapsedSeconds = useMemo(() => (elapsedMs / 1000).toFixed(1), [elapsedMs]);
 
   return (
-    <form
-      onSubmit={handleSubmit}
-      className="grid grid-cols-1 md:grid-cols-2 gap-6"
-    >
-      {/* AI section */}
-      <Section title="AI">
-        <Field label="Anthropic API Key" hint="sk-ant-…">
-          <input
-            type="password"
-            autoComplete="off"
-            spellCheck={false}
-            value={state.anthropicApiKey}
-            onChange={(e) =>
-              setState((s) => ({ ...s, anthropicApiKey: e.target.value }))
-            }
-            className={inputCls + " font-mono"}
-            placeholder="sk-ant-…"
-          />
-        </Field>
-      </Section>
+    <Form {...form}>
+      <form
+        onSubmit={form.handleSubmit(onSubmit)}
+        className="flex flex-col gap-6"
+        noValidate
+      >
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+          {/* AI section */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">AI</CardTitle>
+              <CardDescription>Anthropic credentials.</CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-4">
+              <FormField
+                control={form.control}
+                name="anthropicApiKey"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Anthropic API key</FormLabel>
+                    <FormControl>
+                      <div className="relative">
+                        <Input
+                          {...field}
+                          type={showAnthropicKey ? "text" : "password"}
+                          autoComplete="off"
+                          spellCheck={false}
+                          placeholder="sk-ant-..."
+                          className="pr-10 font-mono"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowAnthropicKey((s) => !s)}
+                          className="absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground hover:text-foreground"
+                          aria-label={
+                            showAnthropicKey ? "Hide key" : "Show key"
+                          }
+                          tabIndex={-1}
+                        >
+                          {showAnthropicKey ? (
+                            <EyeOff className="h-4 w-4" />
+                          ) : (
+                            <Eye className="h-4 w-4" />
+                          )}
+                        </button>
+                      </div>
+                    </FormControl>
+                    <FormDescription>
+                      Used once for this request. Never stored server-side.
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </CardContent>
+          </Card>
 
-      {/* Run options */}
-      <Section title="Run options">
-        <Field label="Window">
-          <select
-            className={selectCls}
-            value={state.since}
-            onChange={(e) =>
-              setState((s) => ({ ...s, since: e.target.value as SinceWindow }))
-            }
-          >
-            <option value="1h">Last 1 hour</option>
-            <option value="6h">Last 6 hours</option>
-            <option value="24h">Last 24 hours</option>
-            <option value="7d">Last 7 days</option>
-            <option value="14d">Last 14 days</option>
-            <option value="30d">Last 30 days</option>
-          </select>
-        </Field>
-        <Field label="Limit (1–25)">
-          <input
-            type="number"
-            min={1}
-            max={25}
-            value={state.limit}
-            onChange={(e) => {
-              const n = Number(e.target.value);
-              setState((s) => ({
-                ...s,
-                limit: Number.isFinite(n)
-                  ? Math.min(25, Math.max(1, Math.floor(n)))
-                  : s.limit,
-              }));
-            }}
-            className={inputCls}
-          />
-        </Field>
-      </Section>
+          {/* Run options */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Run options</CardTitle>
+              <CardDescription>Window and result cap.</CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-4">
+              <FormField
+                control={form.control}
+                name="since"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Window</FormLabel>
+                    <Select
+                      onValueChange={field.onChange}
+                      value={field.value}
+                    >
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Window" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="1h">Last 1 hour</SelectItem>
+                        <SelectItem value="6h">Last 6 hours</SelectItem>
+                        <SelectItem value="24h">Last 24 hours</SelectItem>
+                        <SelectItem value="7d">Last 7 days</SelectItem>
+                        <SelectItem value="14d">Last 14 days</SelectItem>
+                        <SelectItem value="30d">Last 30 days</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="limit"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Limit (1–25)</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={25}
+                        value={field.value}
+                        onChange={(e) => {
+                          const n = Number(e.target.value);
+                          field.onChange(
+                            Number.isFinite(n)
+                              ? Math.min(25, Math.max(1, Math.floor(n)))
+                              : field.value,
+                          );
+                        }}
+                        onBlur={field.onBlur}
+                        name={field.name}
+                        ref={field.ref}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </CardContent>
+          </Card>
 
-      {/* Error provider */}
-      <Section title="Error provider">
-        <Field label="Provider">
-          <select
-            className={selectCls}
-            value={state.errorProvider}
-            onChange={(e) =>
-              setState((s) => ({
-                ...s,
-                errorProvider: e.target.value as ErrorProvider,
-              }))
-            }
-          >
-            <option value="sentry">Sentry</option>
-            <option value="rollbar">Rollbar</option>
-            <option value="bugsnag">Bugsnag</option>
-            <option value="honeybadger">Honeybadger</option>
-          </select>
-        </Field>
-        {state.errorProvider === "sentry" && (
-          <>
-            <Field label="Token">
-              <input
-                type="password"
-                autoComplete="off"
-                value={state.sentry.token}
-                onChange={(e) =>
-                  setState((s) => ({
-                    ...s,
-                    sentry: { ...s.sentry, token: e.target.value },
-                  }))
-                }
-                className={inputCls + " font-mono"}
+          {/* Error provider */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Error provider</CardTitle>
+              <CardDescription>Where your crashes come from.</CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-4">
+              <FormField
+                control={form.control}
+                name="errorProvider"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Provider</FormLabel>
+                    <Select
+                      onValueChange={field.onChange}
+                      value={field.value}
+                    >
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="sentry">Sentry</SelectItem>
+                        <SelectItem value="rollbar">Rollbar</SelectItem>
+                        <SelectItem value="bugsnag">Bugsnag</SelectItem>
+                        <SelectItem value="honeybadger">Honeybadger</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
               />
-            </Field>
-            <Field label="Org">
-              <input
-                value={state.sentry.org}
-                onChange={(e) =>
-                  setState((s) => ({
-                    ...s,
-                    sentry: { ...s.sentry, org: e.target.value },
-                  }))
-                }
-                className={inputCls + " font-mono"}
-              />
-            </Field>
-            <Field label="Project">
-              <input
-                value={state.sentry.project}
-                onChange={(e) =>
-                  setState((s) => ({
-                    ...s,
-                    sentry: { ...s.sentry, project: e.target.value },
-                  }))
-                }
-                className={inputCls + " font-mono"}
-              />
-            </Field>
-          </>
-        )}
-        {state.errorProvider === "rollbar" && (
-          <>
-            <Field label="Read token">
-              <input
-                type="password"
-                autoComplete="off"
-                value={state.rollbar.readToken}
-                onChange={(e) =>
-                  setState((s) => ({
-                    ...s,
-                    rollbar: { ...s.rollbar, readToken: e.target.value },
-                  }))
-                }
-                className={inputCls + " font-mono"}
-              />
-            </Field>
-            <Field label="Project (optional)">
-              <input
-                value={state.rollbar.project}
-                onChange={(e) =>
-                  setState((s) => ({
-                    ...s,
-                    rollbar: { ...s.rollbar, project: e.target.value },
-                  }))
-                }
-                className={inputCls + " font-mono"}
-              />
-            </Field>
-          </>
-        )}
-        {state.errorProvider === "bugsnag" && (
-          <>
-            <Field label="Token">
-              <input
-                type="password"
-                autoComplete="off"
-                value={state.bugsnag.token}
-                onChange={(e) =>
-                  setState((s) => ({
-                    ...s,
-                    bugsnag: { ...s.bugsnag, token: e.target.value },
-                  }))
-                }
-                className={inputCls + " font-mono"}
-              />
-            </Field>
-            <Field label="Organization id">
-              <input
-                value={state.bugsnag.organizationId}
-                onChange={(e) =>
-                  setState((s) => ({
-                    ...s,
-                    bugsnag: {
-                      ...s.bugsnag,
-                      organizationId: e.target.value,
-                    },
-                  }))
-                }
-                className={inputCls + " font-mono"}
-              />
-            </Field>
-            <Field label="Project id">
-              <input
-                value={state.bugsnag.projectId}
-                onChange={(e) =>
-                  setState((s) => ({
-                    ...s,
-                    bugsnag: { ...s.bugsnag, projectId: e.target.value },
-                  }))
-                }
-                className={inputCls + " font-mono"}
-              />
-            </Field>
-          </>
-        )}
-        {state.errorProvider === "honeybadger" && (
-          <>
-            <Field label="Token">
-              <input
-                type="password"
-                autoComplete="off"
-                value={state.honeybadger.token}
-                onChange={(e) =>
-                  setState((s) => ({
-                    ...s,
-                    honeybadger: {
-                      ...s.honeybadger,
-                      token: e.target.value,
-                    },
-                  }))
-                }
-                className={inputCls + " font-mono"}
-              />
-            </Field>
-            <Field label="Project id">
-              <input
-                value={state.honeybadger.projectId}
-                onChange={(e) =>
-                  setState((s) => ({
-                    ...s,
-                    honeybadger: {
-                      ...s.honeybadger,
-                      projectId: e.target.value,
-                    },
-                  }))
-                }
-                className={inputCls + " font-mono"}
-              />
-            </Field>
-          </>
-        )}
-      </Section>
 
-      {/* Session provider */}
-      <Section title="Session provider">
-        <Field label="Provider">
-          <select
-            className={selectCls}
-            value={state.sessionProvider}
-            onChange={(e) =>
-              setState((s) => ({
-                ...s,
-                sessionProvider: e.target.value as SessionProvider,
-              }))
-            }
-          >
-            <option value="posthog">PostHog</option>
-            <option value="logrocket">LogRocket</option>
-          </select>
-        </Field>
-        {state.sessionProvider === "posthog" && (
-          <>
-            <Field label="API key">
-              <input
-                type="password"
-                autoComplete="off"
-                value={state.posthog.apiKey}
-                onChange={(e) =>
-                  setState((s) => ({
-                    ...s,
-                    posthog: { ...s.posthog, apiKey: e.target.value },
-                  }))
-                }
-                className={inputCls + " font-mono"}
-              />
-            </Field>
-            <Field label="Project id">
-              <input
-                value={state.posthog.projectId}
-                onChange={(e) =>
-                  setState((s) => ({
-                    ...s,
-                    posthog: { ...s.posthog, projectId: e.target.value },
-                  }))
-                }
-                className={inputCls + " font-mono"}
-              />
-            </Field>
-            <Field label="Host" hint="EU: https://eu.i.posthog.com">
-              <input
-                value={state.posthog.host}
-                onChange={(e) =>
-                  setState((s) => ({
-                    ...s,
-                    posthog: { ...s.posthog, host: e.target.value },
-                  }))
-                }
-                className={inputCls + " font-mono"}
-              />
-            </Field>
-          </>
-        )}
-        {state.sessionProvider === "logrocket" && (
-          <>
-            <Field label="API key">
-              <input
-                type="password"
-                autoComplete="off"
-                value={state.logrocket.apiKey}
-                onChange={(e) =>
-                  setState((s) => ({
-                    ...s,
-                    logrocket: { ...s.logrocket, apiKey: e.target.value },
-                  }))
-                }
-                className={inputCls + " font-mono"}
-              />
-            </Field>
-            <Field label="App slug">
-              <input
-                value={state.logrocket.appSlug}
-                onChange={(e) =>
-                  setState((s) => ({
-                    ...s,
-                    logrocket: { ...s.logrocket, appSlug: e.target.value },
-                  }))
-                }
-                className={inputCls + " font-mono"}
-              />
-            </Field>
-          </>
-        )}
-      </Section>
+              {errorProvider === "sentry" && (
+                <>
+                  <FormField
+                    control={form.control}
+                    name="sentry.token"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Token</FormLabel>
+                        <FormControl>
+                          <Input
+                            {...field}
+                            type="password"
+                            autoComplete="off"
+                            className="font-mono"
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="sentry.org"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Org</FormLabel>
+                        <FormControl>
+                          <Input {...field} className="font-mono" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="sentry.project"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Project</FormLabel>
+                        <FormControl>
+                          <Input {...field} className="font-mono" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </>
+              )}
 
-      {/* Submit area spans both columns */}
-      <div className="md:col-span-2 flex flex-col gap-4">
+              {errorProvider === "rollbar" && (
+                <>
+                  <FormField
+                    control={form.control}
+                    name="rollbar.readToken"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Read token</FormLabel>
+                        <FormControl>
+                          <Input
+                            {...field}
+                            type="password"
+                            autoComplete="off"
+                            className="font-mono"
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="rollbar.project"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Project (optional)</FormLabel>
+                        <FormControl>
+                          <Input {...field} className="font-mono" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </>
+              )}
+
+              {errorProvider === "bugsnag" && (
+                <>
+                  <FormField
+                    control={form.control}
+                    name="bugsnag.token"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Token</FormLabel>
+                        <FormControl>
+                          <Input
+                            {...field}
+                            type="password"
+                            autoComplete="off"
+                            className="font-mono"
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="bugsnag.organizationId"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Organization id</FormLabel>
+                        <FormControl>
+                          <Input {...field} className="font-mono" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="bugsnag.projectId"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Project id</FormLabel>
+                        <FormControl>
+                          <Input {...field} className="font-mono" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </>
+              )}
+
+              {errorProvider === "honeybadger" && (
+                <>
+                  <FormField
+                    control={form.control}
+                    name="honeybadger.token"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Token</FormLabel>
+                        <FormControl>
+                          <Input
+                            {...field}
+                            type="password"
+                            autoComplete="off"
+                            className="font-mono"
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="honeybadger.projectId"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Project id</FormLabel>
+                        <FormControl>
+                          <Input {...field} className="font-mono" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Session provider */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Session provider</CardTitle>
+              <CardDescription>
+                Where the user&apos;s session replay lives.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-4">
+              <FormField
+                control={form.control}
+                name="sessionProvider"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Provider</FormLabel>
+                    <Select
+                      onValueChange={field.onChange}
+                      value={field.value}
+                    >
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="posthog">PostHog</SelectItem>
+                        <SelectItem value="logrocket">LogRocket</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              {sessionProvider === "posthog" && (
+                <>
+                  <FormField
+                    control={form.control}
+                    name="posthog.apiKey"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>API key</FormLabel>
+                        <FormControl>
+                          <Input
+                            {...field}
+                            type="password"
+                            autoComplete="off"
+                            className="font-mono"
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="posthog.projectId"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Project id</FormLabel>
+                        <FormControl>
+                          <Input {...field} className="font-mono" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="posthog.host"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Host</FormLabel>
+                        <FormControl>
+                          <Input {...field} className="font-mono" />
+                        </FormControl>
+                        <FormDescription>
+                          EU: https://eu.i.posthog.com
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </>
+              )}
+
+              {sessionProvider === "logrocket" && (
+                <>
+                  <FormField
+                    control={form.control}
+                    name="logrocket.apiKey"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>API key</FormLabel>
+                        <FormControl>
+                          <Input
+                            {...field}
+                            type="password"
+                            autoComplete="off"
+                            className="font-mono"
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="logrocket.appSlug"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>App slug</FormLabel>
+                        <FormControl>
+                          <Input {...field} className="font-mono" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
         {formError ? (
-          <div className="rounded-md border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
-            {formError}
-          </div>
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>{formError}</AlertDescription>
+          </Alert>
         ) : null}
-        <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:justify-between">
-          <button
-            type="submit"
-            disabled={submitDisabled}
-            className="inline-flex items-center justify-center gap-2 rounded-md bg-brand-500 px-5 py-3 text-sm font-medium text-ink-950 hover:bg-brand-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
+
+        <Separator />
+
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <Button type="submit" size="lg" disabled={running}>
             {running ? (
               <>
-                <Spinner />
+                <Loader2 className="h-4 w-4 animate-spin" />
                 <span>Triaging… {elapsedSeconds}s</span>
               </>
             ) : (
               <span>Run triage</span>
             )}
-          </button>
-          <p className="text-xs text-ink-500">
-            <span aria-hidden>🔒</span>{" "}
-            Credentials only live in your browser — they&apos;re sent
-            transiently to the server for one request and never stored.
+          </Button>
+          <p className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Lock className="h-3.5 w-3.5" />
+            <span>
+              Credentials only live in your browser — they&apos;re sent
+              transiently to the server for one request and never stored.
+            </span>
           </p>
         </div>
-      </div>
-    </form>
+      </form>
+    </Form>
   );
 }
-
-// ----- Subcomponents ------------------------------------------------------
-
-function Section({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}): JSX.Element {
-  return (
-    <fieldset className="rounded-lg border border-ink-800 bg-ink-900/40 p-5 flex flex-col gap-3">
-      <legend className="px-2 text-xs font-mono uppercase tracking-wider text-ink-500">
-        {title}
-      </legend>
-      {children}
-    </fieldset>
-  );
-}
-
-function Field({
-  label,
-  hint,
-  children,
-}: {
-  label: string;
-  hint?: string;
-  children: React.ReactNode;
-}): JSX.Element {
-  return (
-    <label className="flex flex-col gap-1.5">
-      <span className="text-xs font-medium text-ink-300">
-        {label}
-        {hint ? (
-          <span className="ml-2 text-ink-500 font-normal">{hint}</span>
-        ) : null}
-      </span>
-      {children}
-    </label>
-  );
-}
-
-function Spinner(): JSX.Element {
-  return (
-    <svg
-      className="h-4 w-4 animate-spin"
-      viewBox="0 0 24 24"
-      fill="none"
-      aria-hidden
-    >
-      <circle
-        cx="12"
-        cy="12"
-        r="9"
-        stroke="currentColor"
-        strokeOpacity="0.25"
-        strokeWidth="3"
-      />
-      <path
-        d="M21 12a9 9 0 0 0-9-9"
-        stroke="currentColor"
-        strokeWidth="3"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
-// ----- Shared input classes -----------------------------------------------
-
-const inputCls =
-  "w-full rounded-md border border-ink-700 bg-ink-950/60 px-3 py-2 text-sm text-ink-100 placeholder:text-ink-600 focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500/60";
-
-const selectCls =
-  "w-full rounded-md border border-ink-700 bg-ink-950/60 px-3 py-2 text-sm text-ink-100 focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500/60";
