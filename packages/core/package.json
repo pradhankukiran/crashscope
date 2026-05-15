@@ -27,6 +27,26 @@
       "import": "./dist/errors.js",
       "default": "./dist/errors.js"
     },
+    "./agent": {
+      "types": "./dist/agent/index.d.ts",
+      "import": "./dist/agent/index.js",
+      "default": "./dist/agent/index.js"
+    },
+    "./adapters": {
+      "types": "./dist/adapters/index.d.ts",
+      "import": "./dist/adapters/index.js",
+      "default": "./dist/adapters/index.js"
+    },
+    "./adapters/errors": {
+      "types": "./dist/adapters/errors/index.d.ts",
+      "import": "./dist/adapters/errors/index.js",
+      "default": "./dist/adapters/errors/index.js"
+    },
+    "./adapters/sessions": {
+      "types": "./dist/adapters/sessions/index.d.ts",
+      "import": "./dist/adapters/sessions/index.js",
+      "default": "./dist/adapters/sessions/index.js"
+    },
     "./package.json": "./package.json"
   },
   "scripts": {
