@@ -8,3 +8,5 @@
  */
 export * from "./types/index.js";
 export * from "./errors.js";
+export * from "./agent/index.js";
+export * from "./adapters/index.js";
