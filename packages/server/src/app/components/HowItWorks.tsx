@@ -55,7 +55,7 @@ const STEPS: Step[] = [
 export function HowItWorks(): JSX.Element {
   return (
     <section id="how-it-works" className="border-b">
-      <div className="mx-auto max-w-6xl px-6 py-20">
+      <div className="mx-auto max-w-6xl px-6 py-16">
         <div className="text-center">
           <h2 className="text-3xl font-bold tracking-tight">How it works</h2>
           <p className="mx-auto mt-3 max-w-2xl text-muted-foreground">

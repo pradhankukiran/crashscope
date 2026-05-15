@@ -77,7 +77,7 @@ function RoleBadge({ role }: { role: Role }): JSX.Element {
 export function AdapterMatrix(): JSX.Element {
   return (
     <section id="adapters" className="border-b">
-      <div className="mx-auto max-w-6xl px-6 py-20">
+      <div className="mx-auto max-w-6xl px-6 py-16">
         <div className="text-center">
           <h2 className="text-3xl font-bold tracking-tight">
             Bring your existing stack

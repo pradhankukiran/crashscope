@@ -62,7 +62,7 @@ export function DemoSection(): JSX.Element {
 
   return (
     <section id="try" className="border-b bg-muted/30">
-      <div className="mx-auto max-w-6xl px-6 py-20">
+      <div className="mx-auto max-w-6xl px-6 py-16">
         <Card className="shadow-sm">
           <CardHeader className="text-center">
             <CardTitle className="text-3xl font-bold tracking-tight">
