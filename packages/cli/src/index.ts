@@ -191,7 +191,10 @@ function reportError(err: unknown, debug: boolean): void {
     stderr.write(chalk.red("Error\n"));
     stderr.write(redact(err.message) + "\n");
   } else {
-    stderr.write(chalk.red("Unknown error: " + String(err) + "\n"));
+    // `err` is not a typed Error subclass — stringify defensively and run the
+    // result through `redact` so a tossed-in token (e.g. a thrown plain string
+    // containing an API key) doesn't escape the central handler.
+    stderr.write(chalk.red("Unknown error: " + redact(String(err)) + "\n"));
   }
   if (debug && err instanceof Error && err.stack) {
     stderr.write(chalk.dim("\n" + redact(err.stack) + "\n"));

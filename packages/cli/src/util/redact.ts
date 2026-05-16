@@ -13,20 +13,56 @@
 /**
  * Patterns that almost certainly indicate a credential.
  *
+ * Order matters: earlier entries are tried first, so the more specific
+ * provider-prefixed patterns sit *above* the generic `sk-…` / Bearer rules
+ * to avoid double-mangling a token (e.g. "sntrys_…" being shortened twice).
+ *
  * Each entry replaces with `MASK_REPLACEMENT` and preserves enough context for
  * a human to recognise the surrounding format ("Bearer sk-…1234") so a debug
  * log remains diagnosable.
  */
 const PATTERNS: ReadonlyArray<{ re: RegExp; render: (m: RegExpExecArray) => string }> = [
-  // Anthropic-style API keys: sk-ant-* or generic sk-* of high entropy.
+  // Sentry: both legacy `sntry_` and the current `sntrys_` prefix.
   {
-    re: /\bsk-[a-z0-9\-_]{16,}\b/gi,
+    re: /\bsntrys?_[A-Za-z0-9_-]{20,}\b/g,
     render: (m) => maskPreservingTail(m[0]),
   },
-  // Authorization / Bearer / token headers.
+  // PostHog personal API keys (phx_…) and project keys (phc_…).
   {
-    re: /\b(authorization|bearer|token|api[-_]?key)\s*[:=]\s*["']?([a-z0-9\-_.]{8,})["']?/gi,
+    re: /\bph[xc]_[A-Za-z0-9_-]{20,}\b/g,
+    render: (m) => maskPreservingTail(m[0]),
+  },
+  // Honeybadger personal access tokens.
+  {
+    re: /\bhbp_[A-Za-z0-9_-]{20,}\b/g,
+    render: (m) => maskPreservingTail(m[0]),
+  },
+  // Slack bot / user tokens.
+  {
+    re: /\bxox[bp]-[A-Za-z0-9_-]+\b/g,
+    render: (m) => maskPreservingTail(m[0]),
+  },
+  // Anthropic-style API keys: sk-ant-* (kept distinct from the generic rule
+  // below so the prefix stays visible after masking).
+  {
+    re: /\bsk-ant-[A-Za-z0-9_-]{20,}\b/g,
+    render: (m) => maskPreservingTail(m[0]),
+  },
+  // Generic `sk-…` keys (OpenAI-style, any provider using that prefix).
+  {
+    re: /\bsk-[A-Za-z0-9_-]{20,}\b/g,
+    render: (m) => maskPreservingTail(m[0]),
+  },
+  // Authorization / Bearer / token headers — case-insensitive on the keyword.
+  // Captures the value so a recognisable tail survives in the output.
+  {
+    re: /\b(authorization|bearer|token|api[-_]?key)\s*[:=]\s*["']?([A-Za-z0-9._\-]{8,})["']?/gi,
     render: (m) => `${m[1]}=${maskPreservingTail(m[2] ?? "")}`,
+  },
+  // Standalone Bearer header value (e.g. "Bearer abc.def.ghi").
+  {
+    re: /\b([Bb]earer)\s+([A-Za-z0-9._\-]{8,})\b/g,
+    render: (m) => `${m[1]} ${maskPreservingTail(m[2] ?? "")}`,
   },
   // Slack incoming-webhook URL secrets.
   {
