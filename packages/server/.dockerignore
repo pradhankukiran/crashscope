@@ -1,0 +1,40 @@
+# packages/server/.dockerignore — mirrors the root .dockerignore for the case
+# where a build is run with `packages/server/` as the context. Today the
+# Dockerfile expects the monorepo root as the context (see comment at the top
+# of `Dockerfile`); this file is here as defense-in-depth.
+
+**/node_modules
+**/.next
+**/dist
+**/.turbo
+**/*.tsbuildinfo
+
+**/.git
+**/.gitignore
+**/.gitattributes
+
+**/.env
+**/.env.*
+!**/.env.example
+
+**/.DS_Store
+**/Thumbs.db
+**/.idea
+**/.vscode
+
+**/coverage
+**/.nyc_output
+
+**/.vercel
+
+**/*.log
+**/npm-debug.log*
+**/yarn-debug.log*
+**/yarn-error.log*
+**/pnpm-debug.log*
+
+**/README.md
+**/CHANGELOG.md
+
+**/Dockerfile
+**/.dockerignore
