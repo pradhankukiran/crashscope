@@ -216,11 +216,15 @@ function extractUrl(event: LogRocketEvent): string | null {
 }
 
 /**
- * Mark sequences of >=2 click events within 1s on the same target as rage clicks.
+ * Mark consecutive click events on the same target as rage clicks when each
+ * adjacent pair fires within 1s of the previous one.
  *
- * We mutate the *type* of the entire run (not just trailing clicks) so the
- * triage LLM doesn't see a misleading mix of click + rage_click on the same
- * UI gesture.
+ * The "adjacent" check (rather than measuring against the run's first click)
+ * matches how real rage-click gestures decay: a user spamming a button for
+ * three seconds is still ragey even though the last click is more than 1s
+ * after the first. We promote the *entire* run (not just trailing clicks) so
+ * the triage LLM doesn't see a misleading mix of click + rage_click for the
+ * same UI gesture.
  */
 function markRageClicks(events: NormalizedEvent[]): NormalizedEvent[] {
   const result = events.slice();
@@ -232,18 +236,25 @@ function markRageClicks(events: NormalizedEvent[]): NormalizedEvent[] {
       continue;
     }
     let runEnd = runStart;
-    const startMs = new Date(current.timestamp).getTime();
     while (runEnd + 1 < result.length) {
+      const prev = result[runEnd];
       const next = result[runEnd + 1];
-      if (!next || next.type !== "click" || next.target !== current.target) {
+      if (
+        !prev ||
+        !next ||
+        next.type !== "click" ||
+        next.target !== current.target
+      ) {
         break;
       }
-      const nextMs = new Date(next.timestamp).getTime();
-      if (nextMs - startMs > 1000) break;
+      const adjacentMs =
+        new Date(next.timestamp).getTime() -
+        new Date(prev.timestamp).getTime();
+      if (adjacentMs > 1000) break;
       runEnd += 1;
     }
     if (runEnd - runStart >= 1) {
-      // 2+ clicks within 1s on same target — promote whole run to rage_click.
+      // 2+ clicks on same target with no gap >1s — promote run to rage_click.
       for (let i = runStart; i <= runEnd; i += 1) {
         const ev = result[i];
         if (ev) result[i] = { ...ev, type: "rage_click" };
@@ -349,8 +360,11 @@ export class LogRocketAdapter implements SessionAdapter {
       ),
       this.logrocketGet(eventsPath, logRocketEventsResponseSchema).catch(
         (err: unknown) => {
-          // Events endpoint may not exist on this plan tier. Return an empty
-          // payload so we still surface the session metadata + replay URL.
+          // The per-session events endpoint is gated to higher LogRocket plan
+          // tiers. A 404 here typically means "your plan doesn't expose this
+          // resource" rather than "this session has no events". Degrade
+          // silently: return the session with metadata + replay URL only so
+          // the agent loop still has something to work with.
           if (
             err instanceof AdapterError &&
             err.message.includes("404")
