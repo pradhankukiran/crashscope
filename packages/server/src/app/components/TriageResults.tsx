@@ -124,6 +124,29 @@ function capitalize(s: string): string {
   return s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1);
 }
 
+/**
+ * Return `raw` only if it parses as a `http:` or `https:` URL. Anything else
+ * — `javascript:`, `data:`, `file:`, malformed — returns `null` and the caller
+ * is expected to render the affiliated UI as disabled / omitted.
+ *
+ * Adapters *should* only ever produce http(s) URLs, but the public POST
+ * endpoint forwards adapter output into a React tree we render in the same
+ * page that asked for the credentials; one bad URL field upstream would
+ * become a clickable XSS vector via `<a href="javascript:...">`. Defence in
+ * depth.
+ */
+function safeHref(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  try {
+    const url = new URL(raw);
+    return url.protocol === "http:" || url.protocol === "https:"
+      ? url.toString()
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 // ----- Component ----------------------------------------------------------
 
 export function TriageResults({
@@ -347,27 +370,11 @@ function IssueCard({
 
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-3">
-            <a
-              href={issue.sourceUrl}
-              target="_blank"
-              rel="noreferrer noopener"
-              className="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline"
-            >
-              Open in {capitalize(issue.provider)}
-              <ExternalLink className="h-3 w-3" />
-            </a>
-            {issue.replayUrl ? (
-              <a
-                href={issue.replayUrl}
-                target="_blank"
-                rel="noreferrer noopener"
-                className="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline"
-              >
-                <Video className="h-3 w-3" />
-                Watch replay
-                <ExternalLink className="h-3 w-3" />
-              </a>
-            ) : null}
+            <SourceLink
+              href={safeHref(issue.sourceUrl)}
+              label={`Open in ${capitalize(issue.provider)}`}
+            />
+            <ReplayLink href={safeHref(issue.replayUrl)} />
           </div>
           <Badge
             variant="outline"
@@ -391,5 +398,63 @@ function Block({ label, body }: { label: string; body: string }): JSX.Element {
         {body}
       </p>
     </div>
+  );
+}
+
+/**
+ * Render an external "open in provider" link only when the URL passed
+ * {@link safeHref}. If the upstream URL was missing or used a non-http(s)
+ * scheme, we show a disabled visual instead of a broken or weaponised link.
+ */
+function SourceLink({
+  href,
+  label,
+}: {
+  href: string | null;
+  label: string;
+}): JSX.Element {
+  if (!href) {
+    return (
+      <span
+        className="inline-flex cursor-not-allowed items-center gap-1.5 text-xs font-medium text-muted-foreground"
+        aria-disabled
+        title="Source URL unavailable"
+      >
+        {label}
+        <ExternalLink className="h-3 w-3" />
+      </span>
+    );
+  }
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer noopener"
+      className="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline"
+    >
+      {label}
+      <ExternalLink className="h-3 w-3" />
+    </a>
+  );
+}
+
+/**
+ * Render the "Watch replay" link if the upstream URL is a safe http(s).
+ * Returns `null` entirely when the URL is missing or unsafe: replay isn't a
+ * core affordance, so we keep the UI clean rather than show a disabled stub.
+ */
+function ReplayLink({ href }: { href: string | null }): JSX.Element | null {
+  if (!href) return null;
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer noopener"
+      className="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline"
+    >
+      <Video className="h-3 w-3" />
+      Watch replay
+      <ExternalLink className="h-3 w-3" />
+    </a>
   );
 }
