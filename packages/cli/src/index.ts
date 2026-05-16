@@ -9,6 +9,7 @@ import {
 import { runConfig, type ConfigAction } from "./commands/config.js";
 import { runInit } from "./commands/init.js";
 import {
+  parseFileFormat,
   parseLimit,
   parseOutputList,
   parseSeverityList,
@@ -73,6 +74,19 @@ function buildProgram(): Command {
       wrapParser(parseOutputList),
     )
     .option("--json", "Alias for --output json.")
+    .option(
+      "-o, --out <path>",
+      "Write the report to a file. Format is inferred from extension (.md, .json, .txt) unless --format is given.",
+    )
+    .option(
+      "--format <kind>",
+      "Output format when paired with --out (md, json, terminal).",
+      wrapParser(parseFileFormat),
+    )
+    .option(
+      "--dry-run",
+      "Skip the Claude investigation step. Useful for verifying config without spending tokens.",
+    )
     .option("--debug", "Verbose tracebacks and a debug log at ~/.crashscope/debug.log.")
     .option("--config <path>", "Load an alternate config file.")
     .action(
@@ -82,6 +96,9 @@ function buildProgram(): Command {
         severity?: ReturnType<typeof parseSeverityList>;
         output?: ReturnType<typeof parseOutputList>;
         json?: boolean;
+        out?: string;
+        format?: ReturnType<typeof parseFileFormat>;
+        dryRun?: boolean;
         debug?: boolean;
         config?: string;
       }) => {
@@ -91,6 +108,9 @@ function buildProgram(): Command {
           severities: opts.severity,
           outputs: opts.output,
           json: opts.json === true,
+          out: opts.out,
+          format: opts.format,
+          dryRun: opts.dryRun === true,
           debug: opts.debug === true,
           configPath: opts.config,
         });

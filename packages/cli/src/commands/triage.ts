@@ -20,6 +20,11 @@ import { createErrorAdapter, createSessionAdapter } from "../adapters/index.js";
 import { detectAnthropicAuth } from "../auth/detect.js";
 import { loadConfig } from "../config/load.js";
 import { getDebugLogPath } from "../config/paths.js";
+import {
+  formatFromExtension,
+  writeReportToFile,
+  type FileFormat,
+} from "../output/file.js";
 import { printJsonReport } from "../output/json.js";
 import { postSlackReport } from "../output/slack.js";
 import { printTerminalReport } from "../output/terminal.js";
@@ -42,6 +47,12 @@ export interface TriageOptions {
   severities: Severity[] | undefined;
   outputs: OutputChannel[] | undefined;
   json: boolean;
+  /** Destination for `--out <path>`. When set the report is also written to disk. */
+  out: string | undefined;
+  /** Explicit `--format` override. When absent the extension on `out` decides. */
+  format: FileFormat | undefined;
+  /** Skip the Claude investigation step (set by `--dry-run`). */
+  dryRun: boolean;
   debug: boolean;
   configPath: string | undefined;
 }
@@ -136,6 +147,7 @@ export async function runTriage(options: TriageOptions): Promise<void> {
         durationMs: Date.now() - startedAt,
       });
       await emitOutputs(emptyReport, outputs, config);
+      await maybeWriteToFile(emptyReport, options);
       printEmptyStateHint();
       return;
     }
@@ -209,6 +221,7 @@ export async function runTriage(options: TriageOptions): Promise<void> {
 
     // ---- 10. Emit to selected outputs -------------------------------------
     await emitOutputs(report, outputs, config);
+    await maybeWriteToFile(report, options);
   } finally {
     process.off("SIGINT", onSigint);
   }
@@ -345,6 +358,70 @@ async function fetchSessionsForErrors(
     if (!out.has(error.id)) out.set(error.id, null);
   }
   return out;
+}
+
+/**
+ * Resolve the `FileFormat` for a `--out <path>` write.
+ *
+ * Precedence: explicit `--format` flag, then extension on `--out`. Throws a
+ * `RangeError` (mapped to exit code 1 by the central handler) when neither
+ * source produces a recognised format.
+ */
+function resolveFileFormat(
+  out: string,
+  explicit: FileFormat | undefined,
+): FileFormat {
+  if (explicit !== undefined) return explicit;
+  const fromExt = formatFromExtension(out);
+  if (fromExt !== null) return fromExt;
+  throw new RangeError(
+    `Cannot infer output format from "${out}". Pass --format md|json|terminal.`,
+  );
+}
+
+/**
+ * Write `report` to `--out` if requested.
+ *
+ * Kept as a separate helper so both the empty-results branch and the regular
+ * branch produce identical disk artefacts. ENOENT from `writeFile` is
+ * surfaced verbatim — we deliberately do not create parent directories so a
+ * user typo doesn't silently scatter files across the home directory.
+ */
+async function maybeWriteToFile(
+  report: TriageReport,
+  options: TriageOptions,
+): Promise<void> {
+  if (options.out === undefined) return;
+  const format = resolveFileFormat(options.out, options.format);
+  try {
+    const written = await writeReportToFile(report, options.out, format);
+    process.stderr.write(
+      chalk.green(`Wrote ${format} report to ${written}\n`),
+    );
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new Error(
+        `Cannot write to "${options.out}" — parent directory does not exist.`,
+      );
+    }
+    throw err;
+  }
+}
+
+/**
+ * Parser used by commander for the `--format` flag.
+ *
+ * Exposed alongside the other parsers so the entry point can wrap it via
+ * `wrapParser` and surface the same `InvalidArgumentError` shape on misuse.
+ */
+export function parseFileFormat(value: string): FileFormat {
+  const lowered = value.toLowerCase();
+  if (lowered === "md" || lowered === "markdown") return "md";
+  if (lowered === "json") return "json";
+  if (lowered === "terminal" || lowered === "txt") return "terminal";
+  throw new RangeError(
+    `Invalid --format value "${value}". Expected md, json, or terminal.`,
+  );
 }
 
 /**
