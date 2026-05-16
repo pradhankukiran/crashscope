@@ -26,7 +26,7 @@ alias crashscope="node $PWD/packages/cli/bin/crashscope"
 crashscope --version
 ```
 
-Node 18.18 or newer is required.
+Node 20 or newer is required.
 
 > We will publish to npm once every adapter has been verified against a live account.
 
