@@ -2,6 +2,7 @@
   "name": "crashscope",
   "version": "0.1.0",
   "description": "AI-powered error triage CLI for Sentry, Rollbar, Bugsnag, Honeybadger + PostHog/LogRocket sessions.",
+  "license": "MIT",
   "type": "module",
   "bin": {
     "crashscope": "./bin/crashscope"

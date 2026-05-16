@@ -2,7 +2,7 @@
   "name": "@crashscope/core",
   "version": "0.1.0",
   "description": "Core types, schemas, and adapter interfaces for crashscope.",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

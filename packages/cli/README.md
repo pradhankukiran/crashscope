@@ -143,4 +143,4 @@ in `~/.crashscope/debug.log` (with secrets redacted).
 
 ## License
 
-UNLICENSED.
+MIT — see [LICENSE](../../LICENSE) at the repo root.

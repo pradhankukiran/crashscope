@@ -39,6 +39,7 @@ import {
 } from "@crashscope/core";
 import type { Severity } from "@crashscope/core";
 import { checkApiToken } from "@/lib/auth";
+import { checkPostTriageLimit } from "@/lib/rate-limit";
 import {
   isSinceKeyword,
   runTriage,
@@ -240,6 +241,23 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 // ---------------------------------------------------------------------------
 
 /**
+ * Extract a client IP from the request. Honors `x-forwarded-for` (first hop —
+ * the original client, before our proxies/CDN) and falls back to a fixed
+ * `unknown` bucket so callers without any IP signal still share a single
+ * rate-limit slot rather than being silently let through.
+ */
+function clientIp(req: NextRequest): string {
+  const xff = req.headers.get("x-forwarded-for");
+  if (xff) {
+    const first = xff.split(",")[0]?.trim();
+    if (first) return first;
+  }
+  const real = req.headers.get("x-real-ip");
+  if (real) return real.trim();
+  return "unknown";
+}
+
+/**
  * Body schema for `POST /api/triage`.
  *
  * The `credentials` slot piggybacks on `crashscopeConfigSchema` so we inherit
@@ -374,12 +392,36 @@ function parseTriageBody(
  * anything server-side. Bearer auth lives on `GET` (env-driven mode) and does
  * not apply here.
  *
- * Rate limiting is not implemented yet; the call site below is a clean
- * injection point — wrap the handler entry with a limiter before reaching
- * `parseTriageBody`.
+ * Rate limiting is applied per-IP via {@link checkPostTriageLimit}; see
+ * `lib/rate-limit.ts` for the policy (3/hour, 20/day) and the
+ * Upstash-vs-in-memory backend choice.
  */
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const requestId = randomUUID();
+
+  // 0. Rate limit. Capped *before* parsing the body so an attacker can't burn
+  //    CPU on JSON parsing 10k times. IP is from `x-forwarded-for` first hop
+  //    (Vercel writes that), falling back to `x-real-ip` and finally a fixed
+  //    bucket so callers without any IP signal still share a slot.
+  const ip = clientIp(req);
+  const verdict = await checkPostTriageLimit(ip);
+  if (!verdict.allowed) {
+    console.warn(
+      `[triage:post] rate_limited requestId=${requestId} ip=${ip} reason=${verdict.reason} retryAfterSec=${verdict.retryAfterSec}`,
+    );
+    return errorResponse(
+      429,
+      {
+        error: "RATE_LIMITED",
+        message:
+          verdict.reason === "hour"
+            ? "Hourly rate limit reached. Try again later."
+            : "Daily rate limit reached. Try again tomorrow.",
+        requestId,
+      },
+      { "Retry-After": String(verdict.retryAfterSec) },
+    );
+  }
 
   // 1. Body parse.
   let json: unknown;
