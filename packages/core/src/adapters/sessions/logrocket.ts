@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { AdapterError, AuthError, ValidationError } from "../../errors.js";
+import {
+  AdapterError,
+  AuthError,
+  ValidationError,
+  classifyHttpFailure,
+} from "../../errors.js";
 import type {
   FetchForUserOptions,
   SessionAdapter,
@@ -17,33 +22,38 @@ import type {
  * Resolves a single replay near an error timestamp for a given user and
  * projects it into {@link NormalizedSession}.
  *
- * IMPORTANT CAVEAT: LogRocket's public REST API is sparsely documented and
- * some endpoints are gated to higher plan tiers. The endpoint shapes used
- * here are best-effort and tolerant: every schema uses `.passthrough()` and
- * only fields we depend on are validated. Specifically the following may
- * drift from production:
- *   - The search path. We first try `/v1/apps/{appSlug}/sessions/search`
- *     and fall back to `/v1/orgs/{appSlug}/apps/{appSlug}/sessions/search`
- *     if the first returns 404 — we don't know the org slug independently,
- *     so the appSlug is reused as a best-effort.
- *   - Event type strings (LogRocket uses "click" / "input" / "navigation" /
- *     "error" / "console" / "network" / "redux", but variants like
- *     "page_view" or "page" may also appear).
- *   - `replay_url` is preferred when LogRocket returns it on the session
- *     object; otherwise we construct the canonical app.logrocket.com link.
+ * Endpoint surface (per LogRocket's public REST API documentation):
+ *   GET /v1/orgs/{orgSlug}/apps/{appSlug}/sessions
+ *   GET /v1/orgs/{orgSlug}/apps/{appSlug}/sessions/{sessionId}
+ *   GET /v1/orgs/{orgSlug}/apps/{appSlug}/sessions/{sessionId}/events
+ *
+ * The events endpoint is gated to higher plan tiers; we gracefully degrade
+ * to "session metadata only" if it returns 404.
+ *
+ * Auth: `Authorization: Bearer {service-account-api-key}`.
+ *
+ * NOTE ON FILTER SYNTAX: LogRocket's session search documentation is sparse.
+ * This adapter uses plain query parameters (`user_id`, `start_time`,
+ * `end_time`, `limit`) which is the most plausible REST default. If your
+ * LogRocket plan exposes a different filter convention (e.g. JSON:API
+ * `filter[user][id]=…`), the search will return zero sessions and the
+ * adapter will return `null` — verify against your project's API.
  */
 
 interface LogRocketAdapterOptions {
   readonly apiKey: string;
+  readonly orgSlug: string;
   readonly appSlug: string;
   readonly baseUrl?: string;
 }
 
+const PROVIDER = "logrocket" as const;
 const DEFAULT_BASE_URL = "https://r.logrocket.io";
-const FALLBACK_BASE_URL = "https://api.logrocket.com";
 const DEFAULT_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
 const MAX_RETRIES = 3;
 const BASE_BACKOFF_MS = 300;
+const SESSION_SEARCH_LIMIT = 10;
+const EVENTS_FETCH_LIMIT = 200;
 
 // ---------------------------------------------------------------------------
 // LogRocket response schemas (tolerant — fields we depend on only).
@@ -68,6 +78,7 @@ const logRocketSessionSummarySchema = z
     duration: z.number().optional(),
     duration_ms: z.number().optional(),
     durationMs: z.number().optional(),
+    url: z.string().optional(),
     replay_url: z.string().optional(),
     replayUrl: z.string().optional(),
     user: logRocketUserSchema.optional(),
@@ -120,6 +131,7 @@ const logRocketEventsResponseSchema = z
 
 type LogRocketSessionSummary = z.infer<typeof logRocketSessionSummarySchema>;
 type LogRocketEvent = z.infer<typeof logRocketEventSchema>;
+type LogRocketEventsResponse = z.infer<typeof logRocketEventsResponseSchema>;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -132,10 +144,6 @@ function sleep(ms: number): Promise<void> {
 function jitteredBackoff(attempt: number): number {
   const exp = BASE_BACKOFF_MS * 2 ** attempt;
   return exp + Math.floor(Math.random() * BASE_BACKOFF_MS);
-}
-
-function isRetriableStatus(status: number): boolean {
-  return status === 429 || (status >= 500 && status <= 599);
 }
 
 function toIso(value: string | number | undefined): string | null {
@@ -251,26 +259,34 @@ function markRageClicks(events: NormalizedEvent[]): NormalizedEvent[] {
 // ---------------------------------------------------------------------------
 
 export class LogRocketAdapter implements SessionAdapter {
-  public readonly name = "logrocket";
+  public readonly name = PROVIDER;
 
   private readonly apiKey: string;
+  private readonly orgSlug: string;
   private readonly appSlug: string;
   private readonly baseUrl: string;
 
   public constructor(opts: LogRocketAdapterOptions) {
     if (!opts.apiKey) {
       throw new AdapterError(
-        "logrocket",
+        PROVIDER,
         "apiKey is required to construct LogRocketAdapter",
+      );
+    }
+    if (!opts.orgSlug) {
+      throw new AdapterError(
+        PROVIDER,
+        "orgSlug is required to construct LogRocketAdapter",
       );
     }
     if (!opts.appSlug) {
       throw new AdapterError(
-        "logrocket",
+        PROVIDER,
         "appSlug is required to construct LogRocketAdapter",
       );
     }
     this.apiKey = opts.apiKey;
+    this.orgSlug = opts.orgSlug;
     this.appSlug = opts.appSlug;
     this.baseUrl = (opts.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, "");
   }
@@ -282,44 +298,23 @@ export class LogRocketAdapter implements SessionAdapter {
     const startTime = new Date(opts.around.getTime() - windowMs).toISOString();
     const endTime = new Date(opts.around.getTime() + windowMs).toISOString();
 
+    // Filter syntax: plain query params are the most plausible REST default
+    // for LogRocket's Sessions API. If your plan requires JSON:API style
+    // (`filter[user][id]=…`), the search will return zero sessions and this
+    // method returns `null`.
     const search = new URLSearchParams({
-      userId: opts.userId,
-      startTime,
-      endTime,
-      limit: "10",
+      user_id: opts.userId,
+      start_time: startTime,
+      end_time: endTime,
+      limit: String(SESSION_SEARCH_LIMIT),
     });
 
-    // Path probing: primary is app-scoped; fall back to org-scoped if the
-    // first hop returns 404 (we don't have an org slug, so reuse appSlug).
-    const candidatePaths = [
-      `/v1/apps/${encodeURIComponent(this.appSlug)}/sessions/search?${search.toString()}`,
-      `/v1/orgs/${encodeURIComponent(this.appSlug)}/apps/${encodeURIComponent(this.appSlug)}/sessions/search?${search.toString()}`,
-    ];
-
-    let searchResponse: z.infer<typeof logRocketSearchResponseSchema> | null = null;
-    let lastNotFoundPath = "";
-    for (const path of candidatePaths) {
-      try {
-        searchResponse = await this.logrocketGet(
-          path,
-          logRocketSearchResponseSchema,
-        );
-        break;
-      } catch (err) {
-        if (err instanceof AdapterError && err.message.includes("404")) {
-          lastNotFoundPath = path;
-          continue;
-        }
-        throw err;
-      }
-    }
-
-    if (searchResponse === null) {
-      throw new AdapterError(
-        "logrocket",
-        `session search endpoint not found (tried ${candidatePaths.length} paths; last: ${lastNotFoundPath})`,
-      );
-    }
+    const sessionsRoot = this.sessionsRootPath();
+    const searchPath = `${sessionsRoot}?${search.toString()}`;
+    const searchResponse = await this.logrocketGet(
+      searchPath,
+      logRocketSearchResponseSchema,
+    );
 
     const sessions =
       searchResponse.sessions ??
@@ -332,16 +327,21 @@ export class LogRocketAdapter implements SessionAdapter {
     if (!closest) return null;
 
     // Hydrate detail + events. Detail may already have everything we need;
-    // events is a separate endpoint.
-    const detailPath = `/v1/apps/${encodeURIComponent(this.appSlug)}/sessions/${encodeURIComponent(closest.id)}`;
-    const eventsPath = `${detailPath}/events?limit=200`;
+    // events is a separate endpoint and gated to higher plan tiers.
+    const detailPath = `${sessionsRoot}/${encodeURIComponent(closest.id)}`;
+    const eventsPath = `${detailPath}/events?limit=${EVENTS_FETCH_LIMIT}`;
 
     const [detail, eventsResponse] = await Promise.all([
       this.logrocketGet(detailPath, logRocketSessionDetailSchema).catch(
         (err: unknown) => {
-          // Detail being unavailable shouldn't kill the normalization; we
-          // can fall back to the summary from search.
-          if (err instanceof AdapterError && err.message.includes("404")) {
+          // Detail unavailable shouldn't kill normalization; the summary from
+          // search carries enough fields to continue. 404 specifically means
+          // the session id we picked is no longer addressable — degrade
+          // rather than error.
+          if (
+            err instanceof AdapterError &&
+            err.message.includes("404")
+          ) {
             return closest;
           }
           throw err;
@@ -349,10 +349,13 @@ export class LogRocketAdapter implements SessionAdapter {
       ),
       this.logrocketGet(eventsPath, logRocketEventsResponseSchema).catch(
         (err: unknown) => {
-          if (err instanceof AdapterError && err.message.includes("404")) {
-            const empty: z.infer<typeof logRocketEventsResponseSchema> = {
-              events: [],
-            };
+          // Events endpoint may not exist on this plan tier. Return an empty
+          // payload so we still surface the session metadata + replay URL.
+          if (
+            err instanceof AdapterError &&
+            err.message.includes("404")
+          ) {
+            const empty: LogRocketEventsResponse = { events: [] };
             return empty;
           }
           throw err;
@@ -379,12 +382,17 @@ export class LogRocketAdapter implements SessionAdapter {
     const startedAt = pickStartTime(detail) ?? opts.around.toISOString();
     const durationMs = pickDurationMs(detail);
     const userId = pickUserId(detail, opts.userId);
+    // Prefer the URL LogRocket returns on the session object; fall back to
+    // our canonical builder for plans that don't surface it.
     const replayUrl =
-      detail.replay_url ?? detail.replayUrl ?? this.replayUrl(closest.id);
+      detail.url ??
+      detail.replay_url ??
+      detail.replayUrl ??
+      this.replayUrl(closest.id);
 
     return {
       id: closest.id,
-      provider: "logrocket",
+      provider: PROVIDER,
       userId,
       startedAt,
       durationMs,
@@ -397,41 +405,27 @@ export class LogRocketAdapter implements SessionAdapter {
 
   public replayUrl(sessionId: string): string | null {
     if (!sessionId) return null;
-    return `https://app.logrocket.com/${encodeURIComponent(this.appSlug)}/sessions/${encodeURIComponent(sessionId)}`;
+    return `https://app.logrocket.com/${encodeURIComponent(this.orgSlug)}/${encodeURIComponent(this.appSlug)}/sessions/${encodeURIComponent(sessionId)}`;
+  }
+
+  private sessionsRootPath(): string {
+    return `/v1/orgs/${encodeURIComponent(this.orgSlug)}/apps/${encodeURIComponent(this.appSlug)}/sessions`;
   }
 
   /**
-   * GET helper with retry on 429/5xx and Zod validation.
-   *
-   * Falls over to the secondary host (`api.logrocket.com`) once if the primary
-   * returns a network-level error or 5xx after retries are exhausted, because
-   * LogRocket's docs reference both hosts for different endpoints.
+   * GET helper with retry on 429/5xx, Zod validation, and consistent error
+   * classification:
+   *   - 401 → AuthError ("check your API key")
+   *   - 403 → AuthError ("your plan may not include this API")
+   *   - 404 → non-retryable AdapterError surfaced verbatim so callers can
+   *           probe alternates or degrade gracefully
+   *   - 429/5xx → retryable AdapterError, retried with jittered backoff
    */
   private async logrocketGet<T>(
     path: string,
     schema: z.ZodType<T>,
   ): Promise<T> {
-    try {
-      return await this.attemptGet(this.baseUrl, path, schema);
-    } catch (err) {
-      if (this.baseUrl === DEFAULT_BASE_URL && err instanceof AdapterError) {
-        // Try secondary host once on persistent failure for hot-path endpoints.
-        try {
-          return await this.attemptGet(FALLBACK_BASE_URL, path, schema);
-        } catch {
-          throw err;
-        }
-      }
-      throw err;
-    }
-  }
-
-  private async attemptGet<T>(
-    host: string,
-    path: string,
-    schema: z.ZodType<T>,
-  ): Promise<T> {
-    const url = `${host}${path}`;
+    const url = `${this.baseUrl}${path}`;
     let lastError: unknown = null;
 
     for (let attempt = 0; attempt < MAX_RETRIES; attempt += 1) {
@@ -451,48 +445,53 @@ export class LogRocketAdapter implements SessionAdapter {
           continue;
         }
         throw new AdapterError(
-          "logrocket",
+          PROVIDER,
           `network error calling ${url}: ${err instanceof Error ? err.message : String(err)}`,
-          { cause: err },
+          { cause: err, retryable: true },
         );
       }
 
-      if (response.status === 401) {
+      const status = response.status;
+
+      if (status === 401) {
         throw new AuthError(
-          "logrocket",
+          PROVIDER,
           "unauthorized — check your LogRocket service account API key",
         );
       }
-      if (response.status === 403) {
-        throw new AdapterError(
-          "logrocket",
-          "403 forbidden — your LogRocket plan may not include the Sessions/Search API. Confirm the Service Account has API access on a plan that exposes session endpoints.",
+      if (status === 403) {
+        throw new AuthError(
+          PROVIDER,
+          "forbidden — your LogRocket plan may not include the Sessions API. Confirm the Service Account has API access on a plan that exposes session endpoints.",
         );
       }
-      if (response.status === 404) {
-        // Surface 404 cleanly so the caller can probe alternate paths.
+      if (status === 404) {
         const body = await safeReadText(response);
         throw new AdapterError(
-          "logrocket",
+          PROVIDER,
           `404 not found at ${url}${body ? `: ${body}` : ""}`,
         );
       }
-      if (isRetriableStatus(response.status)) {
-        lastError = new AdapterError(
-          "logrocket",
-          `${response.status} from ${url}`,
+      if (status === 429 || (status >= 500 && status <= 599)) {
+        const body = await safeReadText(response);
+        const classified = classifyHttpFailure(
+          PROVIDER,
+          status,
+          `${url}${body ? `: ${body}` : ""}`,
         );
+        lastError = classified;
         if (attempt < MAX_RETRIES - 1) {
           await sleep(jitteredBackoff(attempt));
           continue;
         }
-        throw lastError;
+        throw classified;
       }
       if (!response.ok) {
         const body = await safeReadText(response);
-        throw new AdapterError(
-          "logrocket",
-          `${response.status} from ${url}${body ? `: ${body}` : ""}`,
+        throw classifyHttpFailure(
+          PROVIDER,
+          status,
+          `${url}${body ? `: ${body}` : ""}`,
         );
       }
 
@@ -501,7 +500,7 @@ export class LogRocketAdapter implements SessionAdapter {
         payload = await response.json();
       } catch (err) {
         throw new AdapterError(
-          "logrocket",
+          PROVIDER,
           `failed to parse JSON from ${url}: ${err instanceof Error ? err.message : String(err)}`,
           { cause: err },
         );
@@ -518,10 +517,16 @@ export class LogRocketAdapter implements SessionAdapter {
     }
 
     // Loop exits only via return/throw; this is defensive.
+    if (lastError instanceof AuthError || lastError instanceof AdapterError) {
+      throw lastError;
+    }
     throw new AdapterError(
-      "logrocket",
+      PROVIDER,
       `exhausted retries calling ${url}`,
-      lastError === null ? undefined : { cause: lastError },
+      {
+        retryable: true,
+        ...(lastError === null ? {} : { cause: lastError }),
+      },
     );
   }
 }
@@ -530,6 +535,12 @@ export class LogRocketAdapter implements SessionAdapter {
 // Pure helpers exposed at module scope for testability.
 // ---------------------------------------------------------------------------
 
+/**
+ * Choose the session whose `[start, end]` interval is closest to `around`.
+ * Distance is 0 when the anchor falls inside the interval, otherwise the
+ * gap to the nearest endpoint. Mirrors `pickClosestRecording` in the PostHog
+ * adapter so triage anchoring behaves consistently across providers.
+ */
 function pickClosest(
   sessions: LogRocketSessionSummary[],
   around: Date,
@@ -540,7 +551,15 @@ function pickClosest(
   for (const s of sessions) {
     const startIso = pickStartTime(s);
     if (!startIso) continue;
-    const distance = Math.abs(new Date(startIso).getTime() - target);
+    const startMs = new Date(startIso).getTime();
+    const endIso = pickEndTime(s);
+    const endMs = endIso ? new Date(endIso).getTime() : startMs;
+    const distance =
+      target < startMs
+        ? startMs - target
+        : target > endMs
+          ? target - endMs
+          : 0;
     if (distance < bestDistance) {
       bestDistance = distance;
       best = s;
