@@ -239,6 +239,12 @@ export class PostHogAdapter implements SessionAdapter {
         new Date(startedAtIso).getTime() + effectiveDurationMs,
       ).toISOString();
 
+    // NOTE: PostHog's `/api/projects/{id}/events/` REST endpoint is being
+    // gradually superseded by HogQL queries (`/api/projects/{id}/query/`).
+    // The legacy endpoint is still supported and is sufficient for the
+    // narrowly-scoped person+window slice we need. A future migration to
+    // HogQL would unlock server-side filtering and event-type projection,
+    // but it's intentionally out of scope here.
     const eventsPath =
       `/api/projects/${encodeURIComponent(this.projectId)}/events/` +
       `?distinct_id=${encodeURIComponent(distinctId)}` +
@@ -251,9 +257,27 @@ export class PostHogAdapter implements SessionAdapter {
       personEventsResponseSchema,
     );
 
-    const events = eventsResponse.results
-      .map(mapPersonEvent)
-      .sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+    // Skip individual events with malformed timestamps rather than failing the
+    // whole session fetch — one bad row in a 200-event batch shouldn't poison
+    // the triage payload. We surface a single aggregate warning if any were
+    // dropped so callers can see the impact without per-row noise.
+    const mappedEvents: NormalizedEvent[] = [];
+    let droppedEvents = 0;
+    for (const raw of eventsResponse.results) {
+      try {
+        mappedEvents.push(mapPersonEvent(raw));
+      } catch {
+        droppedEvents += 1;
+      }
+    }
+    if (droppedEvents > 0 && this.onWarning) {
+      this.onWarning(
+        `[${PROVIDER}] dropped ${droppedEvents} event(s) with unparseable timestamps`,
+      );
+    }
+    const events = mappedEvents.sort((a, b) =>
+      a.timestamp.localeCompare(b.timestamp),
+    );
     const pageViews = buildPageViews(eventsResponse.results);
 
     const session: NormalizedSession = {
@@ -527,7 +551,10 @@ function classifyEventType(
   eventName: string,
   properties: Record<string, unknown>,
 ): NormalizedEventType {
-  if (properties["$exception"] !== undefined) {
+  // Some PostHog SDKs serialize "missing" properties as `null` instead of
+  // omitting the key, so an `!== undefined` check classifies real null
+  // payloads as exceptions. Truthy-check the slot to ignore both.
+  if (properties["$exception"]) {
     return "error";
   }
   switch (eventName) {
