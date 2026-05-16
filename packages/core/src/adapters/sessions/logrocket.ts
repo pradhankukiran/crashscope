@@ -19,6 +19,13 @@ import type {
 /**
  * LogRocket session adapter.
  *
+ * @experimental
+ * The LogRocket adapter has not been verified against a live LogRocket
+ * account. Endpoint paths and filter syntax are inferred from public
+ * documentation; the response-shape schemas are deliberately tolerant so
+ * field drift does not crash normalization. Report bugs to
+ * https://github.com/pradhankukiran/crashscope/issues.
+ *
  * Resolves a single replay near an error timestamp for a given user and
  * projects it into {@link NormalizedSession}.
  *
@@ -276,6 +283,12 @@ export class LogRocketAdapter implements SessionAdapter {
   private readonly orgSlug: string;
   private readonly appSlug: string;
   private readonly baseUrl: string;
+  /**
+   * Tracks whether we've already emitted the "this adapter is experimental"
+   * warning for this instance. Per-instance (not module-static) so multiple
+   * adapters in the same process still each warn once if instantiated.
+   */
+  private hasWarned = false;
 
   public constructor(opts: LogRocketAdapterOptions) {
     if (!opts.apiKey) {
@@ -305,6 +318,16 @@ export class LogRocketAdapter implements SessionAdapter {
   public async fetchForUser(
     opts: FetchForUserOptions,
   ): Promise<NormalizedSession | null> {
+    if (!this.hasWarned) {
+      this.hasWarned = true;
+      // Use console.warn rather than throwing — the adapter is callable and
+      // probably works on common plans, but the maintainers haven't verified
+      // it against a live LogRocket account so callers should treat session
+      // contents as best-effort until they confirm against their project.
+      console.warn(
+        `[${PROVIDER}] adapter is experimental — endpoint paths and filter syntax are inferred from public docs. Verify against your own LogRocket project before relying on it.`,
+      );
+    }
     const windowMs = opts.windowMs ?? DEFAULT_WINDOW_MS;
     const startTime = new Date(opts.around.getTime() - windowMs).toISOString();
     const endTime = new Date(opts.around.getTime() + windowMs).toISOString();
