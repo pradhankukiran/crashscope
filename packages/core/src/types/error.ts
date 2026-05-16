@@ -34,10 +34,28 @@ export const breadcrumbSchema = z.object({
 export type Breadcrumb = z.infer<typeof breadcrumbSchema>;
 
 /**
+ * Optional environmental fingerprint of an error.
+ *
+ * Each field is independently optional so partial-info adapters can populate
+ * what they know without forcing the others. All values are short strings the
+ * triage prompt can include verbatim.
+ */
+export const errorContextSchema = z.object({
+  runtime: z.string().optional(),
+  platform: z.string().optional(),
+  fingerprint: z.string().optional(),
+});
+export type ErrorContext = z.infer<typeof errorContextSchema>;
+
+/**
  * Provider-agnostic representation of an error/issue.
  *
  * Adapters are responsible for translating their native payloads into this
  * shape. `raw` holds the untouched original for advanced consumers.
+ *
+ * `context` is optional — adapters that don't expose runtime/platform/fingerprint
+ * data simply omit it. Adding fields to it is non-breaking: all sub-fields are
+ * optional so existing consumers keep compiling.
  */
 export const normalizedErrorSchema = z.object({
   id: z.string().min(1),
@@ -57,6 +75,7 @@ export const normalizedErrorSchema = z.object({
   sampleUserIds: z.array(z.string()),
   breadcrumbs: z.array(breadcrumbSchema),
   tags: z.record(z.string(), z.string()),
+  context: errorContextSchema.optional(),
   raw: z.unknown(),
 });
 export type NormalizedError = z.infer<typeof normalizedErrorSchema>;

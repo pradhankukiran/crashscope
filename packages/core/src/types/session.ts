@@ -33,8 +33,16 @@ export const normalizedEventSchema = z.object({
 });
 export type NormalizedEvent = z.infer<typeof normalizedEventSchema>;
 
+/**
+ * Page-view URL accepts either a fully-qualified URL or a SPA-style path that
+ * starts with `/` (e.g. `/dashboard/orders/42`). Hash/router fragments emitted
+ * by client-side replays never include a host, so the schema must allow them.
+ */
 export const pageViewSchema = z.object({
-  url: z.string(),
+  url: z
+    .string()
+    .url()
+    .or(z.string().regex(/^\/[^\s]*$/)),
   timestamp: z.string().datetime({ offset: true }),
 });
 export type PageView = z.infer<typeof pageViewSchema>;
