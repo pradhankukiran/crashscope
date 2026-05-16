@@ -164,9 +164,21 @@ function makeSessionAdapter(cfg: CrashscopeConfig): SessionAdapter {
     case "logrocket": {
       const c = cfg.credentials.logrocket;
       if (!c) throw new ConfigError("logrocket credentials missing");
+      // `appSlug` is documented as `org/app` (see `.env.example`); the
+      // adapter now takes them as two fields. Split on the first slash to
+      // preserve the existing config shape while satisfying the upstream
+      // adapter contract.
+      const [orgSlug, ...rest] = c.appSlug.split("/");
+      const appSlug = rest.join("/");
+      if (!orgSlug || !appSlug) {
+        throw new ConfigError(
+          "logrocket.appSlug must be in the form 'org/app'",
+        );
+      }
       return new LogRocketAdapter({
         apiKey: c.apiKey,
-        appSlug: c.appSlug,
+        orgSlug,
+        appSlug,
       });
     }
     default: {
