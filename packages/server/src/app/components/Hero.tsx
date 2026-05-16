@@ -1,16 +1,22 @@
 /**
  * Top-of-page hero. Clean, minimal, no flashy gradients.
  *
- * Headline + subhead + single CTA + a static preview of a sample triage card
- * so visitors see what the product actually produces before scrolling.
+ * Positions the CLI as the product: the primary CTA is a copyable
+ * `npm i -g crashscope` snippet (rendered via {@link TerminalSnippet}), with
+ * a secondary smooth-scroll link to the preview demo and a subtle footer link
+ * for teams who want to deploy the server.
+ *
+ * Stays a server component — the copy interaction lives inside the
+ * {@link CopyButton} client island embedded by {@link TerminalSnippet}.
  */
 
 import {
   AlertOctagon,
+  ArrowDown,
   ExternalLink,
-  Triangle,
   Video,
 } from "lucide-react";
+
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -19,11 +25,9 @@ import {
   CardHeader,
 } from "@/components/ui/card";
 
-const DEPLOY_URL =
-  "https://vercel.com/new/clone?repository-url=" +
-  encodeURIComponent(
-    "https://github.com/crashscope/crashscope/tree/main/packages/server",
-  );
+import { TerminalSnippet } from "./TerminalSnippet";
+
+const INSTALL_COMMAND = "npm i -g crashscope";
 
 export function Hero(): JSX.Element {
   return (
@@ -33,26 +37,41 @@ export function Hero(): JSX.Element {
           AI triage that knows what the user did before the crash
         </Badge>
         <h1 className="mt-6 text-4xl font-bold tracking-tight text-foreground sm:text-6xl">
-          AI-powered error triage
+          An AI-powered error triage CLI
           <br className="hidden sm:block" />
           <span className="text-primary"> for your stack.</span>
         </h1>
         <p className="mx-auto mt-6 max-w-2xl text-base text-muted-foreground sm:text-lg">
           Crashscope joins your error tracker with session replay and uses
-          Claude to produce ranked, actionable triage reports — for Slack, the
-          CLI, or your own automation via REST.
+          Claude to produce ranked, actionable triage reports — right inside
+          your terminal.
         </p>
-        <div className="mt-10 flex justify-center">
-          <Button asChild size="lg">
-            <a href={DEPLOY_URL}>
-              <Triangle className="h-4 w-4 fill-current" />
-              Deploy to Vercel
+        <div className="mt-10 flex flex-col items-center gap-4">
+          <TerminalSnippet
+            lines={[`$ ${INSTALL_COMMAND}`]}
+            copyValue={INSTALL_COMMAND}
+            copyAriaLabel="Copy install command"
+            className="w-full max-w-md"
+          />
+          <Button asChild size="sm" variant="ghost" className="text-muted-foreground">
+            <a href="#try">
+              See it in action
+              <ArrowDown className="h-3.5 w-3.5" />
             </a>
           </Button>
         </div>
         <p className="mt-4 text-xs text-muted-foreground">
           Bring your own Anthropic API key. Credentials never leave your
           browser beyond a single request.
+        </p>
+        <p className="mt-6 text-xs text-muted-foreground">
+          Deploying for your team?{" "}
+          <a
+            href="#quick-start"
+            className="font-medium text-primary underline-offset-4 hover:underline"
+          >
+            Spin up the server →
+          </a>
         </p>
       </div>
 
