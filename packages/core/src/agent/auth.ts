@@ -1,6 +1,6 @@
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
-import { access, constants } from "node:fs/promises";
+import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { AuthError } from "../errors.js";
@@ -22,47 +22,91 @@ export type AuthResolution =
   | { mode: "claude-code" };
 
 /**
- * Check whether the `claude` binary is on PATH.
- *
- * We shell out to `command -v` / `where` rather than depending on the `which`
- * package — the dependency is overkill for a single existence check.
+ * Filenames Claude Code has historically used to store the active credential
+ * blob inside `~/.claude`. We probe both forms because the SDK and CLI have
+ * shipped under each at different points; opening either non-empty file is
+ * sufficient evidence that the user has logged in.
  */
-async function hasClaudeOnPath(): Promise<boolean> {
+const CREDENTIAL_FILES = [".credentials.json", "credentials.json"] as const;
+
+/** Max time we allow `claude --version` to take before giving up. */
+const VERSION_PROBE_TIMEOUT_MS = 2_000;
+
+/**
+ * Check whether the `claude` binary is on PATH **and** actually executes.
+ *
+ * Two stages:
+ * 1. `command -v` / `where` — confirms the binary is reachable.
+ * 2. `claude --version` with a hard 2-second timeout — confirms it runs
+ *    without hanging on, e.g., a broken Node install. Sandboxed runners
+ *    sometimes have the binary on PATH but block child_process; the version
+ *    probe surfaces that case as "missing" rather than a vague auth failure
+ *    later in the SDK call.
+ *
+ * Returns `true` only when both stages succeed.
+ */
+async function isClaudeBinaryUsable(): Promise<boolean> {
   const isWindows = process.platform === "win32";
   const probe = isWindows ? "where claude" : "command -v claude";
   try {
     const { stdout } = await execAsync(probe, { windowsHide: true });
-    return stdout.trim().length > 0;
+    if (stdout.trim().length === 0) return false;
+  } catch {
+    return false;
+  }
+  try {
+    const { stdout, stderr } = await execAsync("claude --version", {
+      windowsHide: true,
+      timeout: VERSION_PROBE_TIMEOUT_MS,
+    });
+    // Some versions print to stderr; accept either as long as something came back.
+    return stdout.trim().length > 0 || stderr.trim().length > 0;
   } catch {
     return false;
   }
 }
 
 /**
- * Check for the existence of `~/.claude` — the Claude Code config directory
- * that holds an authenticated session.
+ * Verify the user has actually logged in to Claude Code by locating a
+ * non-empty credentials blob inside `~/.claude`.
+ *
+ * We don't parse or validate the contents — the SDK owns the schema and it
+ * changes between releases. A non-empty file is good enough evidence.
  */
-async function hasClaudeConfigDir(): Promise<boolean> {
-  try {
-    await access(join(homedir(), ".claude"), constants.F_OK);
-    return true;
-  } catch {
-    return false;
+async function hasClaudeCredentials(): Promise<boolean> {
+  const home = homedir();
+  for (const filename of CREDENTIAL_FILES) {
+    try {
+      const info = await stat(join(home, ".claude", filename));
+      if (info.isFile() && info.size > 0) return true;
+    } catch {
+      // try the next candidate
+    }
   }
+  return false;
 }
 
 /**
  * Resolve which Anthropic auth path crashscope should use for this run.
  *
  * Precedence:
- * 1. `config.apiKey` (explicit in CrashscopeConfig)
- * 2. `ANTHROPIC_API_KEY` env var
- * 3. Local Claude Code installation — `claude` binary on PATH **and** a
- *    `~/.claude/` directory present (binary alone isn't enough; the user must
- *    have at least logged in once for the SDK transport to succeed).
+ * 1. `config.apiKey` (explicit in CrashscopeConfig).
+ * 2. `ANTHROPIC_API_KEY` env var.
+ * 3. Local Claude Code installation. This requires **both**:
+ *    - a usable `claude` binary on PATH (existence + `claude --version`
+ *      returns within {@link VERSION_PROBE_TIMEOUT_MS}), AND
+ *    - a non-empty `~/.claude/(.)credentials.json` proving the user has
+ *      logged in at least once.
+ *    Either alone is insufficient — a fresh install has no creds; a stale
+ *    config dir without the binary can't authenticate the SDK.
  *
  * Throws {@link AuthError} with provider "anthropic" if none of the above are
  * available, so the CLI can render a targeted hint.
+ *
+ * Note: API key handling is per-call by design. The investigation loop passes
+ * the key via `env: { ...process.env, ANTHROPIC_API_KEY }` to the SDK
+ * options. We deliberately never mutate `process.env` here so concurrent
+ * runs with different keys (e.g. in a server context) don't interfere.
  */
 export async function resolveAnthropicAuth(
   config?: CrashscopeConfig["anthropic"],
@@ -77,18 +121,32 @@ export async function resolveAnthropicAuth(
     return { mode: "api-key", apiKey: envKey };
   }
 
-  const [binary, configDir] = await Promise.all([
-    hasClaudeOnPath(),
-    hasClaudeConfigDir(),
+  const [binaryUsable, credsPresent] = await Promise.all([
+    isClaudeBinaryUsable(),
+    hasClaudeCredentials(),
   ]);
-  if (binary && configDir) {
+  if (binaryUsable && credsPresent) {
     return { mode: "claude-code" };
   }
 
+  // Compose a targeted hint based on which check failed so the user knows
+  // whether to log in or install/repair the binary.
+  const reasons: string[] = [];
+  if (!binaryUsable) {
+    reasons.push("the `claude` CLI is not on PATH or did not respond to `claude --version` within 2s");
+  }
+  if (!credsPresent) {
+    reasons.push(
+      "no non-empty credential file was found under ~/.claude (looked for " +
+        CREDENTIAL_FILES.map((f) => `~/.claude/${f}`).join(", ") +
+        ")",
+    );
+  }
   throw new AuthError(
     "anthropic",
     "No Anthropic credentials found. Set ANTHROPIC_API_KEY in your environment, " +
       "provide `anthropic.apiKey` in your crashscope config, or install and log " +
-      "into Claude Code (https://claude.com/code) so ~/.claude exists.",
+      "into Claude Code (https://claude.com/code). " +
+      (reasons.length > 0 ? `Diagnostics: ${reasons.join("; ")}.` : ""),
   );
 }
