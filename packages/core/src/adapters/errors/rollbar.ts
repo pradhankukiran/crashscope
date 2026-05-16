@@ -1,6 +1,11 @@
 import { z, type ZodTypeAny } from "zod";
 
-import { AdapterError, ValidationError } from "../../errors.js";
+import {
+  AdapterError,
+  AuthError,
+  ValidationError,
+  classifyHttpFailure,
+} from "../../errors.js";
 import {
   normalizedErrorSchema,
   type NormalizedError,
@@ -22,6 +27,12 @@ const DEFAULT_BASE_URL = "https://api.rollbar.com";
 const DEFAULT_LIMIT = 25;
 
 /**
+ * Hard upper bound on `limit` — Rollbar's items endpoint caps at 100 per page,
+ * so larger callers buy nothing but a wasted query string.
+ */
+const MAX_LIMIT = 100;
+
+/**
  * Number of stack frames retained in the normalized stack string.
  */
 const MAX_STACK_FRAMES = 20;
@@ -32,9 +43,14 @@ const MAX_STACK_FRAMES = 20;
 const MAX_BREADCRUMBS = 10;
 
 /**
- * Maximum retry attempts for transient HTTP failures.
+ * Total HTTP attempts per request (initial + retries).
+ *
+ * Setting this to 4 yields 1 initial try + 3 retries, matching what we expose
+ * everywhere else in crashscope. Naming it `MAX_ATTEMPTS` (rather than the
+ * older `MAX_RETRIES`) avoids the classic off-by-one — `attempt < MAX_ATTEMPTS`
+ * now means "I have attempts left".
  */
-const MAX_RETRIES = 3;
+const MAX_ATTEMPTS = 4;
 
 /**
  * Base delay (ms) for exponential backoff between retries.
@@ -164,6 +180,11 @@ const itemSchema = z
     last_occurrence_timestamp: z.number().nullable().optional(),
     last_occurrence_id: z.number().nullable().optional(),
     public_item_id: z.number().nullable().optional(),
+    // Rollbar exposes a `uuid` (sometimes `last_occurrence_uuid`) on items
+    // which deep-links to the canonical UI without an account slug. Captured
+    // here so {@link RollbarAdapter.buildSourceUrl} can prefer it over a
+    // potentially mis-routed `https://rollbar.com/item/uid/<id>` URL.
+    uuid: z.string().nullable().optional(),
   })
   .passthrough();
 
@@ -220,7 +241,9 @@ export class RollbarAdapter implements ErrorAdapter {
   public async fetchRecent(
     opts: FetchRecentOptions,
   ): Promise<NormalizedError[]> {
-    const limit = opts.limit > 0 ? opts.limit : DEFAULT_LIMIT;
+    // Clamp limit defensively: callers might pass `Infinity` or a non-integer
+    // and Rollbar caps at 100 per page anyway.
+    const limit = clampLimit(opts.limit);
     const sinceSeconds = Math.floor(opts.since.getTime() / 1000);
     const severityFilter = opts.severities
       ? new Set<Severity>(opts.severities)
@@ -231,6 +254,11 @@ export class RollbarAdapter implements ErrorAdapter {
     )}`;
     const envelope = await this.rollbarGet(path, itemsEnvelopeSchema);
 
+    // Best-effort client-side filter by `since`: the items endpoint does not
+    // accept a time bound, so we drop items whose `last_occurrence_timestamp`
+    // is older than `since` here. Because the slice/limit runs after this
+    // filter, callers may legitimately get fewer than `limit` results when
+    // many recent items predate the window.
     const filtered = envelope.result.items
       .filter((item: RollbarItem) => {
         const last = item.last_occurrence_timestamp;
@@ -252,7 +280,11 @@ export class RollbarAdapter implements ErrorAdapter {
     if (!id) {
       throw new AdapterError("rollbar", "fetchDetail requires a non-empty id");
     }
-    const path = `/api/1/item/${encodeURIComponent(id)}/`;
+    // Drop the trailing slash so the URL matches the pattern Sentry and Bugsnag
+    // use (`/api/1/item/<id>`). Rollbar accepts both forms today, but a single
+    // shape across adapters makes auditing redirects and rate-limit policies
+    // less surprising.
+    const path = `/api/1/item/${encodeURIComponent(id)}`;
     const envelope = await this.rollbarGet(path, itemDetailEnvelopeSchema);
     return this.hydrate(envelope.result);
   }
@@ -339,14 +371,17 @@ export class RollbarAdapter implements ErrorAdapter {
   }
 
   /**
-   * Reconstruct a Rollbar UI deep link. If `project` was supplied we can build
-   * the canonical `/account/project/items/<counter>/` form; otherwise we fall
-   * back to the numeric item endpoint and document the limitation in a JSDoc
-   * comment on this method.
+   * Reconstruct a Rollbar UI deep link.
    *
-   * Limitation: the API does not return the account slug, so without an
-   * out-of-band `project` option the URL points at the generic item route
-   * which still resolves but is less human-friendly.
+   * Resolution order, most → least specific:
+   * 1. If `project` was supplied and the item has a `counter`, build the
+   *    canonical `/account/project/items/<counter>/` URL.
+   * 2. Otherwise, if the item carries a `uuid`, use the documented
+   *    `https://rollbar.com/redirect/by-uuid/<uuid>` redirect endpoint.
+   * 3. Fall back to the API URL for the item. This still resolves (it's a
+   *    valid URL per the {@link normalizedErrorSchema}), but is "untested"
+   *    in the sense that we have not verified it round-trips through the UI
+   *    on every Rollbar tenant.
    */
   private buildSourceUrl(item: RollbarItem): string {
     if (this.project && typeof item.counter === "number") {
@@ -362,12 +397,27 @@ export class RollbarAdapter implements ErrorAdapter {
         item.counter
       }/`;
     }
-    return `https://rollbar.com/item/uid/${item.id}/`;
+    if (typeof item.uuid === "string" && item.uuid.length > 0) {
+      return `https://rollbar.com/redirect/by-uuid/${encodeURIComponent(
+        item.uuid,
+      )}`;
+    }
+    // Untested fallback: the API URL is always a syntactically valid URL,
+    // so the normalized record stays well-formed even if this exact path
+    // doesn't round-trip through every Rollbar tenant's UI.
+    return `${this.baseUrl}/api/1/item/${item.id}`;
   }
 
   /**
-   * Execute a GET against Rollbar, retrying transient 429/5xx responses with
-   * exponential backoff + jitter. Validates the JSON body with `schema`.
+   * Execute a GET against Rollbar.
+   *
+   * - 401/403 → {@link AuthError} (terminal — never retried).
+   * - 429    → retryable, honors `Retry-After` (seconds or HTTP-date).
+   * - 5xx    → retryable, exponential backoff + jitter.
+   * - other  → non-retryable {@link AdapterError}.
+   *
+   * Validates the JSON body against `schema`; mismatches surface as
+   * {@link ValidationError}.
    */
   private async rollbarGet<TSchema extends ZodTypeAny>(
     path: string,
@@ -376,30 +426,31 @@ export class RollbarAdapter implements ErrorAdapter {
     const url = `${this.baseUrl}${path}`;
     let lastError: unknown;
 
-    for (let attempt = 0; attempt < MAX_RETRIES; attempt += 1) {
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
+      let response: Response;
       try {
-        const response = await fetch(url, {
+        response = await fetch(url, {
           method: "GET",
           headers: {
             "X-Rollbar-Access-Token": this.readToken,
             Accept: "application/json",
           },
         });
-
-        if (!response.ok) {
-          if (isTransient(response.status) && attempt < MAX_RETRIES - 1) {
-            await sleep(backoffDelay(attempt));
-            continue;
-          }
-          const snippet = await safeBodySnippet(response);
+      } catch (err) {
+        // Network-level failure. Treat as retryable.
+        lastError = err;
+        if (attempt + 1 >= MAX_ATTEMPTS) {
           throw new AdapterError(
             "rollbar",
-            `GET ${path} -> HTTP ${response.status}${
-              snippet ? `: ${snippet}` : ""
-            }`,
+            `network error calling ${path}: ${describeError(err)}`,
+            { cause: err, retryable: true },
           );
         }
+        await sleep(backoffDelay(attempt));
+        continue;
+      }
 
+      if (response.ok) {
         const json: unknown = await response.json();
         const parsed = schema.safeParse(json);
         if (!parsed.success) {
@@ -409,22 +460,38 @@ export class RollbarAdapter implements ErrorAdapter {
           );
         }
         return parsed.data;
-      } catch (err) {
-        lastError = err;
-        if (err instanceof AdapterError || err instanceof ValidationError) {
-          throw err;
-        }
-        if (attempt < MAX_RETRIES - 1) {
-          await sleep(backoffDelay(attempt));
-          continue;
-        }
       }
+
+      // Non-2xx. Use the shared classifier so 401/403 surfaces as AuthError
+      // and the retryable bit lives on AdapterError.
+      const snippet = await safeBodySnippet(response);
+      const classified = classifyHttpFailure(
+        "rollbar",
+        response.status,
+        `${path} ${snippet}`.trim(),
+      );
+
+      if (classified instanceof AuthError) {
+        throw classified;
+      }
+      if (!(classified instanceof AdapterError) || !classified.retryable) {
+        throw classified;
+      }
+      lastError = classified;
+      if (attempt + 1 >= MAX_ATTEMPTS) {
+        throw classified;
+      }
+      const retryAfterMs = parseRetryAfter(response.headers.get("retry-after"));
+      await sleep(retryAfterMs ?? backoffDelay(attempt));
     }
 
     throw new AdapterError(
       "rollbar",
-      `GET ${path} failed after ${MAX_RETRIES} attempts`,
-      { cause: lastError },
+      `GET ${path} failed after ${MAX_ATTEMPTS} attempts`,
+      {
+        retryable: true,
+        ...(lastError instanceof Error ? { cause: lastError } : {}),
+      },
     );
   }
 }
@@ -551,12 +618,20 @@ function toIsoString(
   return fallback ?? new Date(0).toISOString();
 }
 
-function isTransient(status: number): boolean {
-  return status === 429 || (status >= 500 && status <= 599);
+/**
+ * Clamp a caller-supplied limit into Rollbar's accepted range, defaulting if
+ * the value is `Infinity`, NaN, or non-positive.
+ */
+function clampLimit(limit: number | undefined): number {
+  if (limit === undefined || !Number.isFinite(limit)) return DEFAULT_LIMIT;
+  const floored = Math.floor(limit);
+  if (floored <= 0) return DEFAULT_LIMIT;
+  return Math.min(MAX_LIMIT, Math.max(1, floored));
 }
 
 function backoffDelay(attempt: number): number {
-  const base = BACKOFF_BASE_MS * 2 ** attempt;
+  const safeAttempt = Math.max(0, Math.min(attempt, 6));
+  const base = BACKOFF_BASE_MS * 2 ** safeAttempt;
   const jitter = Math.random() * BACKOFF_BASE_MS;
   return base + jitter;
 }
@@ -565,6 +640,35 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+/**
+ * Parse an HTTP `Retry-After` header (delta-seconds or HTTP-date) into a
+ * millisecond delay. Returns `null` when the header is missing or unparseable.
+ */
+function parseRetryAfter(header: string | null): number | null {
+  if (!header) return null;
+  const trimmed = header.trim();
+  if (trimmed.length === 0) return null;
+  const seconds = Number(trimmed);
+  if (Number.isFinite(seconds)) {
+    return Math.max(0, seconds * 1000);
+  }
+  const dateMs = Date.parse(trimmed);
+  if (Number.isFinite(dateMs)) {
+    return Math.max(0, dateMs - Date.now());
+  }
+  return null;
+}
+
+function describeError(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === "string") return err;
+  try {
+    return JSON.stringify(err);
+  } catch {
+    return "<unserializable error>";
+  }
 }
 
 async function safeBodySnippet(response: Response): Promise<string> {
