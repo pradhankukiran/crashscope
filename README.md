@@ -140,7 +140,13 @@ Dev server runs at `http://localhost:3000`. The landing page includes a **public
 
 ## Authentication
 
-crashscope has two distinct auth paths for Claude. The **CLI** prefers your local Claude Code subscription — if the `claude` binary is on `PATH` and a `~/.claude` directory exists, that path is used and no API key is needed. If that's missing, the CLI falls back to `ANTHROPIC_API_KEY` (env var or `anthropic.apiKey` in the config file). If you're going down the server path, note that serverless functions have no access to your local Claude Code auth context — so the **server** is API-key only: `ANTHROPIC_API_KEY` is required for the GET endpoint and Slack bot. The **public demo** at `POST /api/triage` requires the visitor to bring their own key in the request body.
+crashscope has two distinct auth paths for Claude. The **CLI** resolves credentials in this precedence order:
+
+1. `anthropic.apiKey` from your crashscope config file.
+2. `ANTHROPIC_API_KEY` from the environment.
+3. A local Claude Code installation — the `claude` binary on `PATH` **and** a `~/.claude` directory (created by signing in at [claude.com/code](https://claude.com/code)).
+
+If you're going down the server path, note that serverless functions have no access to your local Claude Code auth context — so the **server** is API-key only: `ANTHROPIC_API_KEY` is required for the GET endpoint and Slack bot. The **public demo** at `POST /api/triage` requires the visitor to bring their own key in the request body.
 
 ## Monorepo layout
 
