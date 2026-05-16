@@ -1,5 +1,11 @@
 import { z } from "zod";
-import { AdapterError, ConfigError, ValidationError } from "../../errors.js";
+import {
+  AdapterError,
+  AuthError,
+  ConfigError,
+  ValidationError,
+  classifyHttpFailure,
+} from "../../errors.js";
 import {
   normalizedSessionSchema,
   type NormalizedEvent,
@@ -331,8 +337,11 @@ export class PostHogAdapter implements SessionAdapter {
   }
 
   /**
-   * GET + retry + parse. Retries on 429 and 5xx with exponential backoff and
-   * full jitter, gives up after {@link MAX_RETRIES} attempts.
+   * GET + retry + parse. 401/403 surface as {@link AuthError}; 429 honors the
+   * `Retry-After` header (seconds or HTTP-date) and retries with exponential
+   * backoff. 5xx is also retried. Classification is delegated to
+   * {@link classifyHttpFailure} so the rest of crashscope sees a stable
+   * taxonomy regardless of which adapter emitted the failure.
    */
   private async posthogGet<T>(path: string, schema: z.ZodType<T>): Promise<T> {
     const url = `${this.host}${path}`;
@@ -358,7 +367,7 @@ export class PostHogAdapter implements SessionAdapter {
         throw new AdapterError(
           PROVIDER,
           `network error calling GET ${path}`,
-          { cause: err },
+          { cause: err, retryable: true },
         );
       }
 
@@ -380,31 +389,42 @@ export class PostHogAdapter implements SessionAdapter {
         return parsed.data;
       }
 
-      const retryable = response.status === 429 || response.status >= 500;
+      const status = response.status;
       const bodyText = await response.text().catch(() => "");
-      lastError = new Error(
-        `HTTP ${response.status} from GET ${path}: ${truncate(bodyText, 200)}`,
-      );
+      const detail = `GET ${path}: ${truncate(bodyText, 200)}`;
 
-      if (!retryable || attempt >= MAX_RETRIES - 1) {
-        throw new AdapterError(
-          PROVIDER,
-          `request failed (${response.status}) for GET ${path}: ${truncate(
-            bodyText,
-            200,
-          )}`,
-          { cause: lastError },
-        );
+      // 401/403 are never retryable; surface immediately as AuthError.
+      if (status === 401 || status === 403) {
+        throw classifyHttpFailure(PROVIDER, status, detail);
       }
 
-      const retryAfter = parseRetryAfter(response.headers.get("retry-after"));
+      const retryable = status === 429 || status >= 500;
+      lastError = classifyHttpFailure(PROVIDER, status, detail);
+
+      if (!retryable || attempt >= MAX_RETRIES - 1) {
+        throw lastError;
+      }
+
+      // Honor Retry-After on 429; for 5xx the server typically omits it.
+      const retryAfter =
+        status === 429
+          ? parseRetryAfter(response.headers.get("retry-after"))
+          : undefined;
       await sleep(backoffDelayMs(attempt, retryAfter));
     }
 
+    // Should never reach here — the loop returns on success or throws on
+    // permanent failure. Defensive guard preserves the last classified error.
+    if (lastError instanceof AuthError || lastError instanceof AdapterError) {
+      throw lastError;
+    }
     throw new AdapterError(
       PROVIDER,
       `exhausted retries for GET ${path}`,
-      lastError !== undefined ? { cause: lastError } : undefined,
+      {
+        retryable: true,
+        ...(lastError !== undefined ? { cause: lastError } : {}),
+      },
     );
   }
 
