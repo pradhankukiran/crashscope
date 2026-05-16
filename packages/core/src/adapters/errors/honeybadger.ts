@@ -1,6 +1,11 @@
 import { z, type ZodError, type ZodTypeAny } from "zod";
 
-import { AdapterError, ValidationError } from "../../errors.js";
+import {
+  AdapterError,
+  AuthError,
+  ValidationError,
+  classifyHttpFailure,
+} from "../../errors.js";
 import type {
   ErrorAdapter,
   FetchRecentOptions,
@@ -18,13 +23,18 @@ const DEFAULT_BASE_URL = "https://app.honeybadger.io";
 const DEFAULT_LIMIT = 25;
 
 /**
- * Retry budget for transient HTTP failures (429 / 5xx).
+ * Total HTTP attempts per request (initial + retries).
+ *
+ * `MAX_ATTEMPTS = 4` means 1 initial try + 3 retries, which is the same
+ * budget every other crashscope adapter uses. The previous `MAX_RETRIES = 3`
+ * with `attempt < MAX_RETRIES` semantics was an off-by-one — the new name
+ * matches what the loop guard actually measures.
  *
  * Tuned to forgive a brief upstream blip without holding the event loop
  * hostage. Backoff is exponential with jitter so a fleet of adapters does not
  * stampede simultaneously.
  */
-const MAX_RETRIES = 3;
+const MAX_ATTEMPTS = 4;
 const BASE_BACKOFF_MS = 250;
 
 /**
@@ -58,6 +68,12 @@ export interface HoneybadgerAdapterOptions {
  *
  * Uses {@link z.ZodObject.passthrough} so future Honeybadger fields land in
  * `raw` untouched without breaking validation.
+ *
+ * `url` is loosely typed: a strict `z.string().url()` would fail the entire
+ * response if Honeybadger ever emitted a path-only or whitespace-padded URL.
+ * We accept any string here and re-validate at the point of use in
+ * {@link HoneybadgerAdapter.toNormalized}, falling back to a constructed
+ * canonical URL when the value isn't a syntactically valid URL.
  */
 const honeybadgerFaultSchema = z
   .object({
@@ -71,7 +87,8 @@ const honeybadgerFaultSchema = z
     unique_occurrences: z.number().int().nonnegative().nullable().optional(),
     created_at: z.string(),
     last_notice_at: z.string().nullable().optional(),
-    url: z.string().url(),
+    // Lenient: accept any string. Validated as a real URL at projection time.
+    url: z.string().url().or(z.string()),
     tags: z.array(z.string()).nullable().optional(),
   })
   .passthrough();
@@ -199,10 +216,38 @@ function encodeBasicAuthHeader(token: string): string {
 }
 
 /**
- * True for HTTP statuses we should retry (rate limit + transient server errors).
+ * Parse an HTTP `Retry-After` header (delta-seconds or HTTP-date) into a
+ * millisecond delay. Returns `null` when the header is missing or unparseable.
  */
-function isRetryableStatus(status: number): boolean {
-  return status === 429 || (status >= 500 && status <= 599);
+function parseRetryAfter(header: string | null): number | null {
+  if (!header) return null;
+  const trimmed = header.trim();
+  if (trimmed.length === 0) return null;
+  const seconds = Number(trimmed);
+  if (Number.isFinite(seconds)) {
+    return Math.max(0, seconds * 1000);
+  }
+  const dateMs = Date.parse(trimmed);
+  if (Number.isFinite(dateMs)) {
+    return Math.max(0, dateMs - Date.now());
+  }
+  return null;
+}
+
+/**
+ * True when a value is a syntactically valid absolute URL.
+ *
+ * Used to gate `fault.url` before handing it to the normalized schema, which
+ * does insist on `z.string().url()`.
+ */
+function isAbsoluteUrl(value: string): boolean {
+  try {
+    // eslint-disable-next-line no-new
+    new URL(value);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -211,6 +256,11 @@ function isRetryableStatus(status: number): boolean {
  * Honeybadger has no first-class severity on faults; convention is encoded in
  * the exception class name. We err on the side of "error" so unrecognised
  * classes don't get silently downgraded.
+ *
+ * The `/fatal/i` regex deliberately matches anywhere in the string — names
+ * like `FatalError`, `MyApp::FatalCrash`, or `fatal_assertion` all upgrade
+ * to severity `"fatal"`. The same applies to `/warn/i` for warning-shaped
+ * classes (`UserWarning`, `DeprecationWarn`, etc.).
  */
 function severityFromKlass(klass: string | null | undefined): Severity {
   if (!klass) return "error";
@@ -418,8 +468,9 @@ export class HoneybadgerAdapter implements ErrorAdapter {
    * Convert a fault + (optional) latest notice into the normalized shape.
    *
    * The notice is optional because some faults have no notices yet (rare but
-   * possible during a flush window). All notice-derived fields degrade
-   * gracefully to empty/null.
+   * possible during a flush window, and possible when the notices endpoint
+   * returns a 404 for a freshly-created fault). All notice-derived fields
+   * degrade gracefully to empty/null.
    */
   private toNormalized(
     fault: HoneybadgerFault,
@@ -428,6 +479,14 @@ export class HoneybadgerAdapter implements ErrorAdapter {
     const noticesCount = fault.notices_count ?? 0;
     const affectedUsers = fault.unique_occurrences ?? noticesCount;
     const lastSeenSource = fault.last_notice_at ?? fault.created_at;
+
+    // Validate the URL at the point of use: the schema is lenient (any string)
+    // so a single malformed entry doesn't poison the whole response.
+    const sourceUrl = isAbsoluteUrl(fault.url)
+      ? fault.url
+      : `${this.baseUrl}/projects/${encodeURIComponent(
+          this.projectId,
+        )}/faults/${encodeURIComponent(fault.id)}`;
 
     return {
       id: fault.id,
@@ -443,7 +502,7 @@ export class HoneybadgerAdapter implements ErrorAdapter {
       eventCount: noticesCount,
       firstSeen: toIsoOffset(fault.created_at),
       lastSeen: toIsoOffset(lastSeenSource),
-      sourceUrl: fault.url,
+      sourceUrl,
       sampleUserIds: extractSampleUserIds(notice),
       breadcrumbs: extractBreadcrumbs(notice),
       tags: tagsToRecord(fault.tags),
@@ -452,9 +511,17 @@ export class HoneybadgerAdapter implements ErrorAdapter {
   }
 
   /**
-   * Fetch the most recent notice for a fault. Returns `undefined` if the
-   * fault exists but has no notices yet — callers treat that as "no
-   * stack/breadcrumbs available" rather than failing outright.
+   * Fetch the most recent notice for a fault.
+   *
+   * Returns `undefined` if the fault exists but has no notices yet — callers
+   * treat that as "no stack/breadcrumbs available" rather than failing
+   * outright. **A 404 from the notices endpoint also returns `undefined`**:
+   * freshly-created faults can legitimately have no notice payload yet, and
+   * the previous implementation aborted the whole `fetchRecent` call when one
+   * such fault appeared in the list.
+   *
+   * AuthError and ValidationError still propagate — both signal problems that
+   * should surface immediately rather than be silently swallowed.
    */
   private async fetchLatestNotice(
     faultId: string,
@@ -463,18 +530,37 @@ export class HoneybadgerAdapter implements ErrorAdapter {
       this.projectId,
     )}/faults/${encodeURIComponent(faultId)}/notices?limit=1`;
 
-    const result = await this.honeybadgerGet(path, honeybadgerNoticeListSchema);
-    return result.results[0];
+    try {
+      const result = await this.honeybadgerGet(path, honeybadgerNoticeListSchema);
+      return result.results[0];
+    } catch (err) {
+      // ValidationError signals schema drift, AuthError signals bad
+      // credentials — both should bubble.
+      if (err instanceof ValidationError) throw err;
+      if (err instanceof AuthError) throw err;
+      // Word-boundary regex avoids matching `404` inside a longer body
+      // snippet (e.g. "id=4040"). Once the underlying response carries a
+      // structured `status` field we can drop the regex.
+      if (err instanceof AdapterError && /HTTP 404\b/.test(err.message)) {
+        return undefined;
+      }
+      throw err;
+    }
   }
 
   /**
    * Issue a `GET` against the Honeybadger API and validate the response with
-   * the supplied Zod schema. Retries on 429/5xx with exponential backoff +
-   * jitter. Throws {@link AdapterError} on persistent failure and
-   * {@link ValidationError} when the response shape is wrong.
+   * the supplied Zod schema.
    *
-   * Kept generic over the schema's inferred output so call sites stay
-   * fully type-checked without resorting to `any`.
+   * - 401/403 → {@link AuthError} (terminal — never retried).
+   * - 429    → retryable, honoring `Retry-After` (seconds or HTTP-date).
+   * - 5xx    → retryable, exponential backoff with jitter.
+   * - other  → non-retryable {@link AdapterError}; the caller decides
+   *           whether it's a 404 to swallow or a real error to propagate.
+   *
+   * Throws {@link ValidationError} when the response shape is wrong. Kept
+   * generic over the schema's inferred output so call sites stay fully
+   * type-checked without resorting to `any`.
    */
   private async honeybadgerGet<S extends ZodTypeAny>(
     path: string,
@@ -483,65 +569,97 @@ export class HoneybadgerAdapter implements ErrorAdapter {
     const url = `${this.baseUrl}${path}`;
     let lastErr: unknown;
 
-    for (let attempt = 0; attempt < MAX_RETRIES; attempt += 1) {
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
+      let response: Response;
       try {
-        const response = await fetch(url, {
+        response = await fetch(url, {
           method: "GET",
           headers: {
             Accept: "application/json",
             Authorization: this.authHeader,
           },
         });
-
-        if (response.ok) {
-          const json: unknown = await response.json();
-          const parsed = schema.safeParse(json);
-          if (!parsed.success) {
-            throw new ValidationError(
-              `[${this.name}] response from ${path} failed schema validation`,
-              parsed.error as ZodError,
-            );
-          }
-          return parsed.data as z.infer<S>;
-        }
-
-        // Non-2xx. Decide whether to retry or fail fast.
-        if (!isRetryableStatus(response.status) || attempt === MAX_RETRIES - 1) {
-          const body = await response.text().catch(() => "");
+      } catch (err) {
+        // Network-level failure (DNS, connection reset, etc). Retryable.
+        lastErr = err;
+        if (attempt + 1 >= MAX_ATTEMPTS) {
           throw new AdapterError(
             this.name,
-            `GET ${path} failed with status ${response.status}${
-              body ? `: ${body.slice(0, 256)}` : ""
-            }`,
+            `network error calling ${path}: ${describeError(err)}`,
+            { cause: err, retryable: true },
           );
         }
-        lastErr = new AdapterError(
-          this.name,
-          `GET ${path} transient status ${response.status}`,
-        );
-      } catch (err) {
-        // ValidationError and non-retryable AdapterError bubble immediately.
-        if (err instanceof ValidationError) throw err;
-        if (
-          err instanceof AdapterError &&
-          !/transient status/i.test(err.message)
-        ) {
-          throw err;
-        }
-        lastErr = err;
-        if (attempt === MAX_RETRIES - 1) break;
+        await sleep(backoffDelay(attempt));
+        continue;
       }
 
-      // Exponential backoff with full jitter: sleep in [0, 2^attempt * base).
-      const ceiling = BASE_BACKOFF_MS * 2 ** attempt;
-      const wait = Math.floor(Math.random() * ceiling);
-      await sleep(wait);
+      if (response.ok) {
+        const json: unknown = await response.json();
+        const parsed = schema.safeParse(json);
+        if (!parsed.success) {
+          throw new ValidationError(
+            `[${this.name}] response from ${path} failed schema validation`,
+            parsed.error as ZodError,
+          );
+        }
+        return parsed.data as z.infer<S>;
+      }
+
+      const body = await response.text().catch(() => "");
+      const classified = classifyHttpFailure(
+        this.name,
+        response.status,
+        `GET ${path} HTTP ${response.status}${
+          body ? `: ${body.slice(0, 256)}` : ""
+        }`,
+      );
+
+      // AuthError is terminal — retrying just wastes attempts.
+      if (classified instanceof AuthError) {
+        throw classified;
+      }
+      // Trust the new structured `retryable` field rather than substring-
+      // matching on the message (which broke if anyone tweaked wording).
+      if (!(classified instanceof AdapterError) || !classified.retryable) {
+        throw classified;
+      }
+      lastErr = classified;
+      if (attempt + 1 >= MAX_ATTEMPTS) {
+        throw classified;
+      }
+      const retryAfterMs = parseRetryAfter(
+        response.headers.get("retry-after"),
+      );
+      await sleep(retryAfterMs ?? backoffDelay(attempt));
     }
 
     throw new AdapterError(
       this.name,
-      `GET ${path} failed after ${MAX_RETRIES} attempts`,
-      { cause: lastErr },
+      `GET ${path} failed after ${MAX_ATTEMPTS} attempts`,
+      {
+        retryable: true,
+        ...(lastErr instanceof Error ? { cause: lastErr } : {}),
+      },
     );
+  }
+}
+
+/**
+ * Exponential backoff with full jitter, expecting a 0-based attempt index.
+ * Capped to keep the exponent reasonable if `MAX_ATTEMPTS` is ever raised.
+ */
+function backoffDelay(attempt: number): number {
+  const safeAttempt = Math.max(0, Math.min(attempt, 6));
+  const ceiling = BASE_BACKOFF_MS * 2 ** safeAttempt;
+  return Math.floor(Math.random() * ceiling);
+}
+
+function describeError(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === "string") return err;
+  try {
+    return JSON.stringify(err);
+  } catch {
+    return "<unserializable error>";
   }
 }
