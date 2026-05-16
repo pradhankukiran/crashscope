@@ -1,9 +1,3 @@
-<p align="center">
-  <a href="https://github.com/pradhankukiran/crashscope">
-    <img src="./assets/banner.svg" alt="crashscope — AI-powered error triage for your stack" width="100%"/>
-  </a>
-</p>
-
 <h1 align="center">crashscope</h1>
 
 <p align="center">
