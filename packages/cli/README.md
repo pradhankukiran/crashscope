@@ -15,11 +15,20 @@ Supported providers:
 
 ## Install
 
+Coming soon to npm — for now, install from source:
+
 ```sh
-npm i -g crashscope
+git clone https://github.com/pradhankukiran/crashscope.git
+cd crashscope
+pnpm install
+pnpm -r build
+alias crashscope="node $PWD/packages/cli/bin/crashscope"
+crashscope --version
 ```
 
 Node 18.18 or newer is required.
+
+> We will publish to npm once every adapter has been verified against a live account.
 
 ## Quick start
 

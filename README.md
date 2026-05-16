@@ -15,7 +15,7 @@
 </p>
 
 <p align="center">
-  <a href="#quick-start--cli"><img src="https://img.shields.io/badge/install_CLI-npm_i_--g_crashscope-000?style=for-the-badge&logo=npm&logoColor=white"/></a>
+  <a href="#quick-start--cli"><img src="https://img.shields.io/badge/install_CLI-from_source-000?style=for-the-badge&logo=github&logoColor=white"/></a>
   &nbsp;
   <a href="#for-teams-deploy-the-server-optional"><img src="https://img.shields.io/badge/Deploy_to_Vercel-▲-black?style=for-the-badge&logo=vercel&logoColor=white"/></a>
 </p>
@@ -99,15 +99,29 @@ All adapters live in `packages/core/src/adapters/{errors,sessions}` and implemen
 
 ## Quick start — CLI
 
+Coming soon to npm — for now, install from source:
+
 ```sh
-npm i -g crashscope
+git clone https://github.com/pradhankukiran/crashscope.git
+cd crashscope
+pnpm install
+pnpm -r build
+alias crashscope="node $PWD/packages/cli/bin/crashscope"
+crashscope --version
+```
+
+Then:
+
+```sh
 crashscope init                   # interactive wizard; writes ~/.crashscope/config.json (chmod 600)
 crashscope triage                 # last 24h, up to 25 issues
 crashscope triage --since 7d --limit 50 --severity fatal,error
 crashscope triage --json | jq .
 ```
 
-The wizard validates each credential against the live API as it goes, so you find out the token is wrong *before* you save it. Full command and flag reference: [packages/cli/README.md](packages/cli/README.md).
+The wizard validates required fields are present. Full command and flag reference: [packages/cli/README.md](packages/cli/README.md).
+
+> We will publish to npm once every adapter has been verified against a live account.
 
 ## For teams: deploy the server (optional)
 

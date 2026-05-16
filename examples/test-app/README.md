@@ -38,9 +38,14 @@ both Sentry (`Sentry.setUser`) and PostHog (`posthog.identify`).
    start sending events.
 4. Use the buttons in sections 2–4 to generate errors and session activity.
 5. Wait ~30 seconds for Sentry + PostHog to propagate the data.
-6. Run crashscope:
+6. Run crashscope. If you installed it globally:
    ```bash
    crashscope triage --since=1h
+   ```
+   Or, if you're running from a source checkout (no published npm package yet):
+   ```bash
+   # from the repo root, after `pnpm install && pnpm -r build`
+   node packages/cli/bin/crashscope triage --since=1h
    ```
 
 ## What each section does
