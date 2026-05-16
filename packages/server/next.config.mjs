@@ -52,15 +52,24 @@ const securityHeaders = [
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const monorepoRoot = resolve(__dirname, "../..");
 
+// Vercel uploads only `packages/server/` to the build container, so the
+// monorepo-anchored Docker config (`output: "standalone"` +
+// `outputFileTracingRoot` pointing two levels up) breaks under Vercel:
+// the tracer produces doubled paths like `/vercel/path0/vercel/path0/.next/...`
+// because Vercel itself wraps the build dir. Detect Vercel via its built-in
+// env var and let Vercel use Next's default serverless output instead.
+const isVercel = !!process.env.VERCEL;
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
   transpilePackages: ["@pradhankukiran/crashscope-core"],
   // Emit a self-contained Node server at `.next/standalone/` for Docker.
   // The runtime entrypoint is `packages/server/server.js` relative to the
-  // standalone output (Next preserves the monorepo layout inside it).
+  // standalone output (Next preserves the monorepo layout inside it). Vercel
+  // skips standalone — it has its own serverless packaging.
   // See: https://nextjs.org/docs/pages/api-reference/next-config-js/output
-  output: "standalone",
+  ...(isVercel ? {} : { output: "standalone" }),
   experimental: {
     typedRoutes: true,
     // Enable the `src/instrumentation.ts` hook so we can validate env at
@@ -72,7 +81,10 @@ const nextConfig = {
     // Without this, Next warns and guesses a root which may miss workspace
     // packages. In Next 14 this lives under `experimental`; promoted to the
     // top level in Next 15.
-    outputFileTracingRoot: monorepoRoot,
+    //
+    // On Vercel, omit this — the parent monorepo isn't part of the build
+    // context, so anchoring there would produce nonsense paths.
+    ...(isVercel ? {} : { outputFileTracingRoot: monorepoRoot }),
   },
   async headers() {
     return [
