@@ -285,6 +285,10 @@ async function runOnce(
   perIssueTimeoutMs: number,
 ): Promise<TriageFinding> {
   let captured: TriageFinding | null = null;
+  // Accumulates validation issues observed across (possibly repeated) tool
+  // calls so we can surface them in the final thrown error if the agent
+  // ultimately fails. Otherwise debugging "why is captured null" is painful.
+  const validationIssues: string[] = [];
   const combinedSignal = combineSignals(signal, perIssueTimeoutMs);
   const controller = makeAbortController(combinedSignal);
 
@@ -296,20 +300,34 @@ async function runOnce(
         "Emit the structured triage finding for the current error.",
         triageFindingRawShape,
         async (args) => {
+          // Reject duplicate tool_use blocks. Previously, a second call would
+          // silently overwrite the first — that lets the model amend its own
+          // output mid-turn, which we don't want for an audited triage record.
+          if (captured !== null) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: "Already captured; ignoring duplicate.",
+                },
+              ],
+              isError: true,
+            };
+          }
           // Validate with our own schema. If the SDK ever forwards unchecked
           // input (e.g. via a transport that skips JSON schema enforcement),
           // this still rejects malformed payloads.
           const parsed = triageFindingSchema.safeParse(args);
           if (!parsed.success) {
+            const issueSummary = parsed.error.issues
+              .map((i) => `${i.path.join(".")}: ${i.message}`)
+              .join("; ");
+            validationIssues.push(issueSummary);
             return {
               content: [
                 {
                   type: "text",
-                  text:
-                    "Validation failed: " +
-                    parsed.error.issues
-                      .map((i) => `${i.path.join(".")}: ${i.message}`)
-                      .join("; "),
+                  text: "Validation failed: " + issueSummary,
                 },
               ],
               isError: true,
@@ -366,7 +384,15 @@ async function runOnce(
   }
 
   if (!captured) {
-    throw new Error(lastErrorMessage ?? `${NO_TOOL_USE_MESSAGE}.`);
+    const parts: string[] = [];
+    parts.push(lastErrorMessage ?? `${NO_TOOL_USE_MESSAGE}.`);
+    if (validationIssues.length > 0) {
+      parts.push(
+        `observed ${validationIssues.length} tool-input validation failure(s): ` +
+          validationIssues.join(" | "),
+      );
+    }
+    throw new Error(parts.join(" "));
   }
   return captured;
 }
