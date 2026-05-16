@@ -47,7 +47,7 @@ both Sentry (`Sentry.setUser`) and PostHog (`posthog.identify`).
    ```bash
    crashscope triage --since=1h
    ```
-   Or, if you're running from a source checkout (no published npm package yet):
+   Or, if you're running from a source checkout:
    ```bash
    # from the repo root, after `pnpm install && pnpm -r build`
    node packages/cli/bin/crashscope triage --since=1h

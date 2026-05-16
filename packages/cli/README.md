@@ -15,7 +15,14 @@ Supported providers:
 
 ## Install
 
-Coming soon to npm — for now, install from source:
+From npm:
+
+```sh
+npm i -g @pradhankukiran/crashscope
+crashscope --version
+```
+
+Or from source:
 
 ```sh
 git clone https://github.com/pradhankukiran/crashscope.git
@@ -27,8 +34,6 @@ crashscope --version
 ```
 
 Node 20 or newer is required.
-
-> We will publish to npm once every adapter has been verified against a live account.
 
 ## Quick start
 

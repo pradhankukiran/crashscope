@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Surface a friendly message when the compiled CLI is missing or fails to
-// load. Without this, `npm i -g crashscope` followed by `crashscope` from a
+// load. Without this, `npm i -g @pradhankukiran/crashscope` followed by `crashscope` from a
 // half-installed prefix would explode as an UnhandledPromiseRejection — the
 // node default handler prints the full module-not-found trace and a
 // "(node:…) [DEP_…]" warning that buries the actionable hint.
@@ -16,7 +16,7 @@ import("../dist/index.js").catch((err) => {
     `${err && err.message ? err.message : String(err)}\n`,
   );
   process.stderr.write(
-    "If you installed from source, run `pnpm --filter crashscope build` first.\n",
+    "If you installed from source, run `pnpm --filter @pradhankukiran/crashscope build` first.\n",
   );
   process.exit(1);
 });

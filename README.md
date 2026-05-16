@@ -97,7 +97,14 @@ All adapters live in `packages/core/src/adapters/{errors,sessions}` and implemen
 
 ## Quick start — CLI
 
-Coming soon to npm — for now, install from source:
+Install from npm:
+
+```sh
+npm i -g @pradhankukiran/crashscope
+crashscope --version
+```
+
+Or install from source:
 
 ```sh
 git clone https://github.com/pradhankukiran/crashscope.git
@@ -120,8 +127,6 @@ crashscope triage --json | jq .
 The wizard validates required fields are present. Full command and flag reference: [packages/cli/README.md](packages/cli/README.md).
 
 Don't have errors in your Sentry yet? Generate test data with the [test harness](examples/test-app/README.md).
-
-> We will publish to npm once every adapter has been verified against a live account.
 
 ## For teams: deploy the server (optional)
 
@@ -184,7 +189,7 @@ Per-package dev commands:
 | Package              | Dev command                              | Notes                                |
 | -------------------- | ---------------------------------------- | ------------------------------------ |
 | `@pradhankukiran/crashscope-core`   | `pnpm --filter @pradhankukiran/crashscope-core build`   | Pure TS — no watch mode needed.      |
-| `crashscope`         | `pnpm --filter crashscope build`         | Then run `node packages/cli/bin/crashscope …`. |
+| `@pradhankukiran/crashscope` | `pnpm --filter @pradhankukiran/crashscope build` | Then run `node packages/cli/bin/crashscope …`. |
 | `@crashscope/server` | `pnpm --filter @crashscope/server dev`   | Next.js dev server on port 3000.     |
 
 ## Configuration

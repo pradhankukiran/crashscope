@@ -24,12 +24,12 @@ import { Separator } from "@/components/ui/separator";
 import { TerminalSnippet } from "./TerminalSnippet";
 
 const CLI_LINES = [
-  "$ npm i -g crashscope",
+  "$ npm i -g @pradhankukiran/crashscope",
   "$ crashscope init",
   "$ crashscope triage --since 24h",
 ] as const;
 const CLI_CLIPBOARD =
-  "npm i -g crashscope\ncrashscope init\ncrashscope triage --since 24h";
+  "npm i -g @pradhankukiran/crashscope\ncrashscope init\ncrashscope triage --since 24h";
 
 interface TeamSurface {
   key: string;

@@ -2,7 +2,7 @@
  * Top-of-page hero. Clean, minimal, no flashy gradients.
  *
  * Positions the CLI as the product: the primary CTA is a copyable
- * `npm i -g crashscope` snippet (rendered via {@link TerminalSnippet}), with
+ * `npm i -g @pradhankukiran/crashscope` snippet (rendered via {@link TerminalSnippet}), with
  * a secondary smooth-scroll link to the preview demo and a subtle footer link
  * for teams who want to deploy the server.
  *
@@ -27,7 +27,7 @@ import {
 
 import { TerminalSnippet } from "./TerminalSnippet";
 
-const INSTALL_COMMAND = "npm i -g crashscope";
+const INSTALL_COMMAND = "npm i -g @pradhankukiran/crashscope";
 
 export function Hero(): JSX.Element {
   return (

@@ -180,8 +180,8 @@ export function TriageResults({
 
 // ----- Install CLI callout -------------------------------------------------
 
-const INSTALL_LINES = ["$ npm i -g crashscope", "$ crashscope init && crashscope triage"];
-const INSTALL_CLIPBOARD = "npm i -g crashscope\ncrashscope init && crashscope triage";
+const INSTALL_LINES = ["$ npm i -g @pradhankukiran/crashscope", "$ crashscope init && crashscope triage"];
+const INSTALL_CLIPBOARD = "npm i -g @pradhankukiran/crashscope\ncrashscope init && crashscope triage";
 
 function InstallCliCallout(): JSX.Element {
   return (
