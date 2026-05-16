@@ -33,8 +33,6 @@
 
 crashscope pulls fresh issues from your error tracker, joins each one against the user session that produced it, and asks Claude to investigate. The output is a ranked triage report — hypothesis, root-cause guess, files to inspect, user journey, confidence — delivered to your terminal, Slack, or a REST endpoint. Install the CLI to triage from your terminal. Deploying the server is optional — it's how teams expose a `/triage` Slack command or a REST API on top of the same pipeline.
 
-Don't want to install just yet? Visit the [live demo](https://crashscope.vercel.app) (once it's deployed) to paste your credentials and preview the output.
-
 ## Why
 
 - **One digest, not five tabs.** Stop bouncing between Sentry, PostHog, GitHub, and your bug tracker to triage a single issue.
