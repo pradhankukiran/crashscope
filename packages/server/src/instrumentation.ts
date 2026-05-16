@@ -18,9 +18,13 @@
 export async function register(): Promise<void> {
   if (process.env["NEXT_RUNTIME"] !== "nodejs") return;
   try {
-    // Lazy-import so the edge bundle never pulls Zod or node-crypto via
-    // transitive deps.
-    const mod = await import("./lib/env.js");
+    // Lazy-import so the edge bundle never pulls Zod or `node:os` via
+    // transitive deps. The `webpackIgnore` magic comment is required: without
+    // it, Webpack tries to *include* the dynamic-imported module in the edge
+    // bundle as a code-split chunk, which fails because `@crashscope/core`
+    // transitively imports `node:` modules. With it, Webpack leaves the
+    // import string untouched and the Node runtime resolves it at boot.
+    const mod = await import(/* webpackIgnore: true */ "./lib/env.js");
     mod.loadEnv();
     console.info("[crashscope] env validation ok at boot");
   } catch (err: unknown) {
@@ -29,7 +33,10 @@ export async function register(): Promise<void> {
     // rather than crash-looping with no surface visible to the operator.
     // Redact in case the validation error embedded a partial token in its
     // message (Zod doesn't, today, but defence in depth costs nothing here).
-    const { redactError } = await import("./lib/redact.js");
-    console.error("[crashscope] env validation failed at boot:", redactError(err));
+    const redactMod = await import(/* webpackIgnore: true */ "./lib/redact.js");
+    console.error(
+      "[crashscope] env validation failed at boot:",
+      redactMod.redactError(err),
+    );
   }
 }
