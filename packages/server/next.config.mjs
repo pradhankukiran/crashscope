@@ -4,6 +4,9 @@ const nextConfig = {
   transpilePackages: ["@crashscope/core"],
   experimental: {
     typedRoutes: true,
+    // Enable the `src/instrumentation.ts` hook so we can validate env at
+    // boot. Default is `false` in Next 14; auto-on from Next 15.
+    instrumentationHook: true,
     serverComponentsExternalPackages: ["@anthropic-ai/claude-agent-sdk"],
   },
   webpack: (config) => {
