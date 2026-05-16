@@ -126,7 +126,14 @@ crashscope triage --json | jq .
 
 The wizard validates required fields are present. Full command and flag reference: [packages/cli/README.md](packages/cli/README.md).
 
-Don't have errors in your Sentry yet? Generate test data with the [test harness](examples/test-app/README.md).
+### No errors to triage yet? Use the test harness
+
+If your Sentry/PostHog project is brand-new and has no traffic, crashscope has nothing to investigate. The bundled **test harness** generates matched Sentry errors + PostHog session events under a shared user ID so the full pipeline has real data to chew on.
+
+- **Hosted (zero setup):** https://crashscope-web-production.up.railway.app/test-harness/
+- **Self-hosted:** `cd examples/test-app && python3 -m http.server 8080` and open <http://localhost:8080>
+
+Paste your Sentry DSN + PostHog Project API key (the public `phc_…` one, *not* the personal `phx_…` you use in the CLI config), click **Save & Initialize**, then trigger a few errors. Wait ~30 seconds for propagation, then run `crashscope triage`. Full walkthrough: [examples/test-app/README.md](examples/test-app/README.md).
 
 ## For teams: deploy the server (optional)
 

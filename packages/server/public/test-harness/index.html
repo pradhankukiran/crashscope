@@ -1,0 +1,725 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Crashscope · Test Harness</title>
+    <style>
+      :root {
+        --bg: #f5f6f8;
+        --panel: #ffffff;
+        --line: #e5e7eb;
+        --line-soft: #f1f3f5;
+        --text: #111827;
+        --muted: #6b7280;
+        --accent: #4f46e5;
+        --accent-soft: #eef2ff;
+        --danger: #dc2626;
+        --danger-soft: #fef2f2;
+        --warn: #d97706;
+        --warn-soft: #fffbeb;
+        --success: #059669;
+        --success-soft: #ecfdf5;
+        --shadow:
+          0 1px 2px rgba(16, 24, 40, 0.04),
+          0 1px 3px rgba(16, 24, 40, 0.05);
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        background: var(--bg);
+        color: var(--text);
+        font-family:
+          "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+          sans-serif;
+        margin: 0;
+        padding: 28px 24px 56px;
+        max-width: 1400px;
+        margin-inline: auto;
+        line-height: 1.5;
+      }
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 24px;
+        margin-bottom: 24px;
+        padding-bottom: 20px;
+        border-bottom: 1px solid var(--line);
+        flex-wrap: wrap;
+      }
+      .topbar .brand {
+        flex: 1;
+        min-width: 280px;
+      }
+      .topbar .actions {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+      h1 {
+        margin: 0 0 4px;
+        font-size: 24px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+      }
+      h2 {
+        margin: 0 0 14px;
+        font-size: 12px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--muted);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      p.lede {
+        color: var(--muted);
+        margin: 0;
+        font-size: 14px;
+      }
+      .main-grid {
+        display: grid;
+        grid-template-columns: 340px 1fr;
+        gap: 16px;
+        align-items: start;
+      }
+      .sidebar {
+        position: sticky;
+        top: 16px;
+      }
+      .right-col {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+      .content-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+      }
+      @media (max-width: 1024px) {
+        .main-grid {
+          grid-template-columns: 1fr;
+        }
+        .sidebar {
+          position: static;
+        }
+      }
+      @media (max-width: 720px) {
+        .content-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+      section {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 22px;
+        box-shadow: var(--shadow);
+        display: flex;
+        flex-direction: column;
+      }
+      label {
+        display: block;
+        margin: 10px 0 6px;
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--text);
+      }
+      input[type="text"] {
+        width: 100%;
+        background: var(--panel);
+        color: var(--text);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 9px 12px;
+        font-family:
+          ui-monospace, "SF Mono", Monaco, "Cascadia Code", monospace;
+        font-size: 13px;
+        transition: border-color 0.15s, box-shadow 0.15s;
+      }
+      input[type="text"]::placeholder {
+        color: #9ca3af;
+      }
+      input[type="text"]:focus {
+        outline: none;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px var(--accent-soft);
+      }
+      .btn-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 12px;
+      }
+      button {
+        background: var(--panel);
+        color: var(--text);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 9px 14px;
+        font-size: 13px;
+        font-weight: 500;
+        font-family: inherit;
+        cursor: pointer;
+        transition: all 0.15s;
+      }
+      button:hover {
+        border-color: #d1d5db;
+        background: #f9fafb;
+      }
+      button.primary {
+        background: var(--accent);
+        color: #fff;
+        border-color: var(--accent);
+      }
+      button.primary:hover {
+        background: #4338ca;
+        border-color: #4338ca;
+      }
+      button.danger {
+        color: var(--danger);
+        border-color: #fecaca;
+        background: var(--danger-soft);
+      }
+      button.danger:hover {
+        background: #fee2e2;
+        border-color: #fca5a5;
+      }
+      button.warn {
+        color: var(--warn);
+        border-color: #fde68a;
+        background: var(--warn-soft);
+      }
+      button.warn:hover {
+        background: #fef3c7;
+        border-color: #fcd34d;
+      }
+      #status {
+        margin-top: 14px;
+        padding: 10px 12px;
+        border-radius: 8px;
+        background: var(--line-soft);
+        font-family: ui-monospace, monospace;
+        font-size: 12px;
+        color: var(--muted);
+        white-space: pre-wrap;
+      }
+      #status.ok {
+        background: var(--success-soft);
+        color: var(--success);
+      }
+      #status.err {
+        background: var(--danger-soft);
+        color: var(--danger);
+      }
+      .log-wrap {
+        display: flex;
+        justify-content: center;
+      }
+      .log {
+        width: 100%;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 16px 20px;
+        font-family: ui-monospace, monospace;
+        font-size: 12px;
+        max-height: 220px;
+        overflow-y: auto;
+        color: var(--text);
+        box-shadow: var(--shadow);
+      }
+      .log:empty::before {
+        content: "Activity log — events will appear here as you interact.";
+        color: var(--muted);
+        font-style: italic;
+      }
+      .log .ts {
+        color: var(--muted);
+        margin-right: 4px;
+      }
+      .log > div {
+        padding: 2px 0;
+      }
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        padding: 2px 8px;
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        border-radius: 999px;
+        background: var(--line-soft);
+        color: var(--muted);
+      }
+      .pill.ok {
+        background: var(--success-soft);
+        color: var(--success);
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 4px;
+      }
+      .helper {
+        color: var(--muted);
+        font-size: 13px;
+        margin: 0 0 4px;
+      }
+      code {
+        background: var(--line-soft);
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 13px;
+        font-family:
+          ui-monospace, "SF Mono", Monaco, "Cascadia Code", monospace;
+      }
+      .footer {
+        text-align: center;
+        color: var(--muted);
+        font-size: 12px;
+        margin-top: 24px;
+        max-width: 800px;
+        margin-inline: auto;
+      }
+    </style>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <h1>Crashscope · Test Harness</h1>
+        <p class="lede">
+          Generate matched Sentry errors and PostHog sessions so the crashscope
+          CLI has something to triage.
+        </p>
+      </div>
+      <div class="actions">
+        <button class="primary" onclick="runFlow()" title="Run a realistic end-to-end scenario: click → input → submit → navigate → rage click → crash">
+          Run end-to-end scenario →
+        </button>
+      </div>
+    </header>
+
+    <div class="main-grid">
+      <aside class="sidebar">
+        <section>
+          <h2>Configuration</h2>
+          <div class="grid">
+            <div>
+              <label for="dsn">Sentry DSN</label>
+              <input
+                id="dsn"
+                type="text"
+                placeholder="https://abc...@oXXX.ingest.sentry.io/YYYYY"
+              />
+            </div>
+            <div>
+              <label for="phk">PostHog Project API Key (phc_…)</label>
+              <input
+                id="phk"
+                type="text"
+                placeholder="phc_xxxxxxxxxxxxxxxxxxxx"
+              />
+            </div>
+            <div>
+              <label for="phh">PostHog Host</label>
+              <input id="phh" type="text" value="https://us.i.posthog.com" />
+            </div>
+            <div>
+              <label for="uid">User ID (Sentry + PostHog)</label>
+              <input id="uid" type="text" value="test-user-1" />
+            </div>
+          </div>
+          <div class="btn-row">
+            <button class="primary" onclick="saveAndInit()">
+              Save &amp; Initialize
+            </button>
+            <button onclick="clearConfig()">Clear</button>
+          </div>
+          <div id="status">Not initialized.</div>
+        </section>
+      </aside>
+
+      <div class="right-col">
+        <div class="content-grid">
+          <section>
+          <h2>
+            Trigger Errors
+            <span class="pill" id="sentry-pill">Sentry</span>
+          </h2>
+          <p class="helper">
+            Each click captures an error in Sentry tagged with the configured
+            user ID.
+          </p>
+          <div class="btn-row">
+            <button class="danger" onclick="throwTypeError()">TypeError</button>
+            <button class="danger" onclick="throwReferenceError()">
+              ReferenceError
+            </button>
+            <button class="danger" onclick="throwRangeError()">
+              RangeError
+            </button>
+            <button class="danger" onclick="throwCustom()">Custom Error</button>
+            <button class="danger" onclick="throwAsync()">Async Error</button>
+            <button class="danger" onclick="unhandledRejection()">
+              Unhandled Rejection
+            </button>
+            <button class="warn" onclick="captureMessage()">
+              Capture Warning
+            </button>
+            <button class="warn" onclick="fetch404()">Fetch 404</button>
+          </div>
+        </section>
+
+        <section>
+          <h2>
+            Simulate User Interaction
+            <span class="pill" id="posthog-pill">PostHog</span>
+          </h2>
+          <p class="helper">
+            PostHog auto-captures clicks, inputs, and page views. Build a
+            session before triggering an error.
+          </p>
+          <div class="btn-row">
+            <button data-action="cta">Primary CTA</button>
+            <button data-action="secondary">Secondary CTA</button>
+            <button data-action="cancel">Cancel</button>
+            <button data-action="submit">Submit</button>
+          </div>
+          <label for="form-input">Test input field</label>
+          <input
+            id="form-input"
+            type="text"
+            placeholder="Type to fire input events"
+          />
+          <div class="btn-row">
+            <button onclick="fakeNavigate('/checkout')">
+              Navigate /checkout
+            </button>
+            <button onclick="fakeNavigate('/account')">
+              Navigate /account
+            </button>
+            <button onclick="rageClickArea()">Rage click (5× fast)</button>
+            <button onclick="manualEvent()">Manual capture()</button>
+          </div>
+        </section>
+        </div>
+        <div class="log-wrap">
+          <div class="log" id="log"></div>
+        </div>
+      </div>
+    </div>
+
+    <p class="footer">
+      Open DevTools → Network to confirm events reach Sentry and PostHog. Wait
+      ~30s before running crashscope so data propagates.
+    </p>
+
+    <!-- Sentry browser SDK -->
+    <script
+      src="https://browser.sentry-cdn.com/8.42.0/bundle.min.js"
+      crossorigin="anonymous"
+    ></script>
+    <!-- PostHog snippet (loads async, exposes window.posthog) -->
+    <script>
+      !(function (t, e) {
+        var o, n, p, r;
+        e.__SV ||
+          ((window.posthog = e),
+          (e._i = []),
+          (e.init = function (i, s, a) {
+            function g(t, e) {
+              var o = e.split(".");
+              2 == o.length && ((t = t[o[0]]), (e = o[1])),
+                (t[e] = function () {
+                  t.push([e].concat(Array.prototype.slice.call(arguments, 0)));
+                });
+            }
+            ((p = t.createElement("script")).type = "text/javascript"),
+              (p.crossOrigin = "anonymous"),
+              (p.async = !0),
+              (p.src =
+                s.api_host.replace(".i.posthog.com", "-assets.i.posthog.com") +
+                "/static/array.js"),
+              (r = t.getElementsByTagName("script")[0]).parentNode.insertBefore(
+                p,
+                r
+              );
+            var u = e;
+            for (
+              void 0 !== a ? (u = e[a] = []) : (a = "posthog"),
+                u.people = u.people || [],
+                u.toString = function (t) {
+                  var e = "posthog";
+                  return (
+                    "posthog" !== a && (e += "." + a),
+                    t || (e += " (stub)"),
+                    e
+                  );
+                },
+                u.people.toString = function () {
+                  return u.toString(1) + ".people (stub)";
+                },
+                o =
+                  "init capture register register_once register_for_session unregister unregister_for_session getFeatureFlag getFeatureFlagPayload isFeatureEnabled reloadFeatureFlags updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures on onFeatureFlags onSessionId getSurveys getActiveMatchingSurveys renderSurvey canRenderSurvey identify setPersonProperties group resetGroups setPersonPropertiesForFlags resetPersonPropertiesForFlags setGroupPropertiesForFlags resetGroupPropertiesForFlags reset get_distinct_id getGroups get_session_id get_session_replay_url alias set_config startSessionRecording stopSessionRecording sessionRecordingStarted captureException loadToolbar get_property getSessionProperty createPersonProfile opt_in_capturing opt_out_capturing has_opted_in_capturing has_opted_out_capturing clear_opt_in_out_capturing debug getPageViewId".split(
+                    " "
+                  ),
+                n = 0;
+              n < o.length;
+              n++
+            )
+              g(u, o[n]);
+            e._i.push([i, s, a]);
+          }),
+          (e.__SV = 1));
+      })(document, window.posthog || []);
+    </script>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const log = (msg, kind = "info") => {
+        const el = $("log");
+        const ts = new Date().toLocaleTimeString();
+        const div = document.createElement("div");
+        div.innerHTML = `<span class="ts">${ts}</span> · ${msg}`;
+        el.appendChild(div);
+        el.scrollTop = el.scrollHeight;
+      };
+      const STORAGE_KEY = "crashscope-test-config";
+
+      function loadSavedConfig() {
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY);
+          if (!raw) return;
+          const c = JSON.parse(raw);
+          if (c.dsn) $("dsn").value = c.dsn;
+          if (c.phk) $("phk").value = c.phk;
+          if (c.phh) $("phh").value = c.phh;
+          if (c.uid) $("uid").value = c.uid;
+        } catch {}
+      }
+      function saveConfig() {
+        const c = {
+          dsn: $("dsn").value.trim(),
+          phk: $("phk").value.trim(),
+          phh: $("phh").value.trim(),
+          uid: $("uid").value.trim(),
+        };
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(c));
+        return c;
+      }
+      function clearConfig() {
+        localStorage.removeItem(STORAGE_KEY);
+        $("dsn").value = "";
+        $("phk").value = "";
+        $("phh").value = "https://us.i.posthog.com";
+        $("uid").value = "test-user-1";
+        setStatus("Config cleared. Reload to start fresh.", "ok");
+      }
+      function setStatus(msg, kind) {
+        const s = $("status");
+        s.textContent = msg;
+        s.className = kind || "";
+      }
+
+      let initialized = false;
+      function saveAndInit() {
+        const c = saveConfig();
+        if (!c.dsn || !c.phk || !c.uid) {
+          setStatus("Missing DSN, PostHog key, or user ID.", "err");
+          return;
+        }
+        try {
+          window.Sentry.init({
+            dsn: c.dsn,
+            tracesSampleRate: 0,
+            integrations: [],
+          });
+          window.Sentry.setUser({ id: c.uid });
+          log(`Sentry initialized for user ${c.uid}`);
+        } catch (e) {
+          setStatus(`Sentry init failed: ${e.message}`, "err");
+          return;
+        }
+        try {
+          window.posthog.init(c.phk, {
+            api_host: c.phh || "https://us.i.posthog.com",
+            session_recording: { maskAllInputs: false },
+            autocapture: true,
+            capture_pageview: true,
+            persistence: "localStorage+cookie",
+            loaded: (ph) => {
+              ph.identify(c.uid);
+              log(`PostHog initialized for user ${c.uid}`);
+              log(`PostHog session id: ${ph.get_session_id()}`);
+            },
+          });
+        } catch (e) {
+          setStatus(`PostHog init failed: ${e.message}`, "err");
+          return;
+        }
+        initialized = true;
+        $("sentry-pill").classList.add("ok");
+        $("posthog-pill").classList.add("ok");
+        setStatus(
+          `Initialized. User ID "${c.uid}" identified in both. Open Network tab to verify events.`,
+          "ok"
+        );
+      }
+
+      function guard() {
+        if (!initialized) {
+          setStatus("Initialize first.", "err");
+          return false;
+        }
+        return true;
+      }
+
+      // Error generators
+      function throwTypeError() {
+        if (!guard()) return;
+        try {
+          const x = null;
+          x.foo();
+        } catch (e) {
+          window.Sentry.captureException(e);
+          log(`TypeError captured: ${e.message}`);
+        }
+      }
+      function throwReferenceError() {
+        if (!guard()) return;
+        try {
+          undefinedSymbol();
+        } catch (e) {
+          window.Sentry.captureException(e);
+          log(`ReferenceError captured: ${e.message}`);
+        }
+      }
+      function throwRangeError() {
+        if (!guard()) return;
+        try {
+          new Array(-1);
+        } catch (e) {
+          window.Sentry.captureException(e);
+          log(`RangeError captured: ${e.message}`);
+        }
+      }
+      function throwCustom() {
+        if (!guard()) return;
+        const err = new Error(
+          "Checkout failed: payment processor returned status 502"
+        );
+        err.name = "CheckoutError";
+        window.Sentry.captureException(err);
+        log("Custom error captured (CheckoutError)");
+      }
+      function throwAsync() {
+        if (!guard()) return;
+        setTimeout(() => {
+          try {
+            JSON.parse("{not valid json");
+          } catch (e) {
+            window.Sentry.captureException(e);
+            log(`Async error captured: ${e.message}`);
+          }
+        }, 50);
+      }
+      function unhandledRejection() {
+        if (!guard()) return;
+        Promise.reject(new Error("Unhandled promise rejection (test)"));
+        log("Unhandled rejection fired (Sentry will pick it up)");
+      }
+      function captureMessage() {
+        if (!guard()) return;
+        window.Sentry.captureMessage(
+          "Soft warning: feature flag eval returned default",
+          "warning"
+        );
+        log("Warning message captured");
+      }
+      async function fetch404() {
+        if (!guard()) return;
+        try {
+          const res = await fetch("/this-route-does-not-exist-" + Date.now());
+          if (!res.ok)
+            throw new Error(`HTTP ${res.status} fetching test endpoint`);
+        } catch (e) {
+          window.Sentry.captureException(e);
+          log(`Fetch error captured: ${e.message}`);
+        }
+      }
+
+      // PostHog interaction generators
+      function fakeNavigate(path) {
+        if (!guard()) return;
+        const url = location.origin + location.pathname + "#" + path;
+        history.pushState({}, "", url);
+        window.posthog.capture("$pageview", { $current_url: url });
+        log(`Navigated to ${path}`);
+      }
+      function rageClickArea() {
+        if (!guard()) return;
+        const t = document.querySelectorAll("button[data-action]")[0];
+        for (let i = 0; i < 5; i++) {
+          setTimeout(() => t.click(), i * 80);
+        }
+        log("Simulated rage click (5x within 400ms)");
+      }
+      function manualEvent() {
+        if (!guard()) return;
+        window.posthog.capture("test_manual_event", {
+          source: "crashscope-test-app",
+          ts: Date.now(),
+        });
+        log("Manual posthog.capture() fired");
+      }
+
+      async function runFlow() {
+        if (!guard()) return;
+        log("--- Starting end-to-end flow ---");
+        document.querySelector('button[data-action="cta"]').click();
+        await sleep(400);
+        $("form-input").focus();
+        $("form-input").value = "test@example.com";
+        $("form-input").dispatchEvent(new Event("change", { bubbles: true }));
+        await sleep(300);
+        document.querySelector('button[data-action="submit"]').click();
+        await sleep(400);
+        fakeNavigate("/checkout");
+        await sleep(500);
+        rageClickArea();
+        await sleep(700);
+        throwCustom();
+        log("--- End-to-end flow complete ---");
+      }
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+      loadSavedConfig();
+
+      // Persist every keystroke in the config inputs so values survive
+      // page reloads even when the user never clicks "Save & Initialize".
+      ["dsn", "phk", "phh", "uid"].forEach((id) => {
+        $(id).addEventListener("input", saveConfig);
+      });
+
+      // Echo data-action button clicks into the log so users see something
+      // happened (the actual event goes to PostHog via autocapture).
+      document.querySelectorAll("button[data-action]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          if (!initialized) return;
+          log(`Clicked: ${btn.textContent.trim()} (data-action=${btn.dataset.action})`);
+        });
+      });
+
+      // Same for the test input — log on change so users see PostHog captured it.
+      $("form-input").addEventListener("change", (e) => {
+        if (!initialized) return;
+        log(`Input changed: "${e.target.value}"`);
+      });
+    </script>
+  </body>
+</html>

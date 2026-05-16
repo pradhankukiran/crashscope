@@ -10,6 +10,10 @@ the whole stack with one set of synthetic events.
 
 No build step. CDN-loaded SDKs. Open it in a browser.
 
+The same harness is also served by the deployed Next.js app at
+<https://crashscope-web-production.up.railway.app/test-harness/> — use that
+if you'd rather skip the local-server step.
+
 ## What you need
 
 From your Sentry project (the one you want crashscope to monitor):
@@ -30,14 +34,16 @@ both Sentry (`Sentry.setUser`) and PostHog (`posthog.identify`).
 
 ## Usage
 
-1. Open `index.html` in your browser. The easiest path is:
-   ```bash
-   cd examples/test-app
-   python3 -m http.server 8080
-   # then visit http://localhost:8080
-   ```
-   (Opening directly via `file://` works in most browsers but a local server
-   is more reliable.)
+1. Open the harness in your browser. Two paths:
+   - **Hosted (no setup):** <https://crashscope-web-production.up.railway.app/test-harness/>
+   - **Self-hosted:**
+     ```bash
+     cd examples/test-app
+     python3 -m http.server 8080
+     # then visit http://localhost:8080
+     ```
+     (Opening directly via `file://` works in most browsers but a local server
+     is more reliable.)
 2. Paste your DSN, PostHog key, host, and user ID.
 3. Click **Save & Initialize**. The status line will turn green and the SDKs
    start sending events.

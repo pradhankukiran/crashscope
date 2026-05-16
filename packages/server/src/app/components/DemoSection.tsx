@@ -15,7 +15,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertCircle } from "lucide-react";
+import { AlertCircle, ArrowRight, FlaskConical } from "lucide-react";
 import type { TriageReport } from "@pradhankukiran/crashscope-core";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -74,6 +74,31 @@ export function DemoSection(): JSX.Element {
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-8 pt-2">
+            <a
+              href="/test-harness/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="group flex items-center justify-between gap-4 rounded-md border border-primary/20 bg-primary/5 px-4 py-3 text-sm transition-colors hover:bg-primary/10"
+            >
+              <span className="flex items-center gap-3">
+                <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary/15 text-primary">
+                  <FlaskConical className="h-4 w-4" />
+                </span>
+                <span>
+                  <span className="font-medium text-foreground">
+                    No errors in your Sentry yet?
+                  </span>{" "}
+                  <span className="text-muted-foreground">
+                    Generate matched test errors + sessions with the test harness.
+                  </span>
+                </span>
+              </span>
+              <span className="inline-flex shrink-0 items-center gap-1 font-medium text-primary">
+                Open
+                <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
+              </span>
+            </a>
+
             <DemoForm onResult={handleResult} onError={handleError} />
 
             {(errorMessage && !report) || report ? (
