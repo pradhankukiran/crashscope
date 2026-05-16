@@ -26,18 +26,27 @@ export abstract class CrashscopeError extends Error {
  *
  * `provider` is the adapter's {@link ErrorAdapter.name} or
  * {@link SessionAdapter.name} so users can see which integration broke.
+ *
+ * `retryable` is `true` when the failure looks transient (e.g. HTTP 429 or 5xx,
+ * network blip). Adapters set this explicitly rather than asking callers to
+ * substring-match on `.message`. Defaults to `false`.
  */
 export class AdapterError extends CrashscopeError {
   public readonly code = "ADAPTER_ERROR";
   public readonly provider: string;
+  public readonly retryable: boolean;
 
   public constructor(
     provider: string,
     message: string,
-    options?: { cause?: unknown },
+    options?: { cause?: unknown; retryable?: boolean },
   ) {
-    super(`[${provider}] ${message}`, options);
+    super(
+      `[${provider}] ${message}`,
+      options?.cause !== undefined ? { cause: options.cause } : undefined,
+    );
     this.provider = provider;
+    this.retryable = options?.retryable ?? false;
   }
 }
 
@@ -94,4 +103,52 @@ export class ValidationError extends CrashscopeError {
   public get issues(): ZodError["issues"] {
     return this.zodError.issues;
   }
+}
+
+/**
+ * Classify an HTTP failure from an adapter and produce the right error type.
+ *
+ * Adapters call this after a non-2xx response so the rest of crashscope can
+ * branch on a stable taxonomy:
+ * - 401/403 → {@link AuthError} (CLI renders a "check credentials" hint).
+ * - 429    → retryable {@link AdapterError} (caller backs off and retries).
+ * - 5xx    → retryable {@link AdapterError} (transient upstream failure).
+ * - otherwise → non-retryable {@link AdapterError}.
+ *
+ * `detail` should be a short, user-visible string (e.g. truncated response
+ * body or status text). `cause` preserves the underlying error if any.
+ */
+export function classifyHttpFailure(
+  provider: string,
+  status: number,
+  detail: string,
+  cause?: unknown,
+): CrashscopeError {
+  if (status === 401 || status === 403) {
+    return new AuthError(
+      provider,
+      detail,
+      cause !== undefined ? { cause } : undefined,
+    );
+  }
+  if (status === 429) {
+    return new AdapterError(provider, `${provider} rate-limited (HTTP 429): ${detail}`, {
+      retryable: true,
+      ...(cause !== undefined ? { cause } : {}),
+    });
+  }
+  if (status >= 500) {
+    return new AdapterError(
+      provider,
+      `${provider} transient failure (HTTP ${status}): ${detail}`,
+      {
+        retryable: true,
+        ...(cause !== undefined ? { cause } : {}),
+      },
+    );
+  }
+  return new AdapterError(provider, `${provider} HTTP ${status}: ${detail}`, {
+    retryable: false,
+    ...(cause !== undefined ? { cause } : {}),
+  });
 }
