@@ -22,6 +22,7 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 import {
   AlertCircle,
+  Eraser,
   Eye,
   EyeOff,
   Loader2,
@@ -324,6 +325,9 @@ export function DemoForm({
   const [formError, setFormError] = useState<string | null>(null);
   const [showAnthropicKey, setShowAnthropicKey] = useState(false);
   const tickRef = useRef<number | null>(null);
+  // Held across re-renders so the unmount cleanup can abort an in-flight
+  // request. Each submit installs a fresh controller before issuing fetch().
+  const abortRef = useRef<AbortController | null>(null);
 
   // ----- Hydrate from localStorage once. -----------------------------------
 
@@ -357,6 +361,19 @@ export function DemoForm({
   useEffect(() => {
     onRunStateChange?.({ running, elapsedMs });
   }, [onRunStateChange, running, elapsedMs]);
+
+  // On unmount, abort any in-flight triage request. Without this, a user
+  // navigating away mid-run would leave the fetch pending; while `fetch`
+  // can't actually be "garbage collected" the browser still keeps the
+  // connection open and the eventual response handlers would try to call
+  // setState on an unmounted component (React 18 silently no-ops but warns
+  // in dev).
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+      abortRef.current = null;
+    };
+  }, []);
 
   // Elapsed-time ticker while running.
   useEffect(() => {
@@ -430,12 +447,18 @@ export function DemoForm({
         },
       };
 
+      // Replace any prior controller so successive submits don't share one.
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
+
       setRunning(true);
       try {
         const res = await fetch("/api/triage", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
+          signal: controller.signal,
         });
         const text = await res.text();
         let payload: unknown = null;
@@ -459,15 +482,43 @@ export function DemoForm({
         }
         onResult(payload as TriageReport);
       } catch (err) {
+        // AbortError is the expected path when a navigation or a new submit
+        // cancelled us; don't surface it as a user-facing failure.
+        if (
+          err instanceof DOMException &&
+          err.name === "AbortError"
+        ) {
+          return;
+        }
         const message = err instanceof Error ? err.message : "Network error.";
         setFormError(message);
         onError(message);
       } finally {
-        setRunning(false);
+        // Only flip running off if *this* controller is still the active one
+        // — otherwise a later submit has already taken over.
+        if (abortRef.current === controller) {
+          setRunning(false);
+          abortRef.current = null;
+        }
       }
     },
     [onError, onResult],
   );
+
+  /**
+   * Wipe the localStorage snapshot and reset the form to defaults. Doesn't
+   * affect any in-flight request — the user is most likely clearing because
+   * they want to swap credentials, not abort.
+   */
+  const onClearCredentials = useCallback((): void => {
+    try {
+      window.localStorage.removeItem(STORAGE_KEY);
+    } catch {
+      // Quota / privacy mode: ignore — the form reset below still happens.
+    }
+    form.reset(DEFAULT_VALUES);
+    setFormError(null);
+  }, [form]);
 
   // ----- Render -----------------------------------------------------------
 
@@ -528,6 +579,16 @@ export function DemoForm({
                   </FormItem>
                 )}
               />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={onClearCredentials}
+                className="self-start"
+              >
+                <Eraser className="h-3.5 w-3.5" />
+                Clear stored credentials
+              </Button>
             </CardContent>
           </Card>
 
@@ -949,11 +1010,14 @@ export function DemoForm({
               <span>Run triage</span>
             )}
           </Button>
-          <p className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-            <Lock className="h-3.5 w-3.5" />
+          <p className="inline-flex items-start gap-1.5 text-xs text-muted-foreground sm:max-w-md">
+            <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <span>
-              Credentials only live in your browser — they&apos;re sent
-              transiently to the server for one request and never stored.
+              Credentials are persisted to localStorage so you don&apos;t have
+              to re-enter them, and are sent transiently to the server for one
+              request only — never stored server-side. Click{" "}
+              <span className="font-medium">Clear stored credentials</span> to
+              wipe them.
             </span>
           </p>
         </div>
