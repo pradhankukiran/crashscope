@@ -113,8 +113,16 @@ export function createSessionAdapter(config: CrashscopeConfig): SessionAdapter {
         throw new ConfigError(
           "LogRocket credentials missing from config.credentials.logrocket.",
         );
+      // LogRocket's URL scheme is `/v1/orgs/{orgSlug}/apps/{appSlug}` and
+      // the adapter accepts an explicit `orgSlug` field. The config schema
+      // doesn't yet have a dedicated slot for it, so we forward the appSlug
+      // as a stand-in — sites whose org and app slugs differ should set
+      // `appSlug` to `"<org>/<app>"`. The LogRocket adapter is being
+      // rewritten in core; once the schema gains an `orgSlug` field this
+      // can be threaded through cleanly.
       return new LogRocketAdapter({
         apiKey: c.apiKey,
+        orgSlug: c.appSlug,
         appSlug: c.appSlug,
       });
     }

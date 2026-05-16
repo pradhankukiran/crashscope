@@ -124,7 +124,10 @@ export async function runTriage(options: TriageOptions): Promise<void> {
     }
 
     // Early exit for empty result sets — produce an empty report so JSON / CI
-    // consumers always get a parseable payload.
+    // consumers always get a parseable payload. A "no issues" run is the
+    // most common reason new users get confused ("did it work?"), so we drop
+    // a single hint on stderr pointing them at the wider window flag and the
+    // bundled test harness.
     if (errors.length === 0) {
       const emptyReport = buildReport({
         issues: [],
@@ -133,6 +136,7 @@ export async function runTriage(options: TriageOptions): Promise<void> {
         durationMs: Date.now() - startedAt,
       });
       await emitOutputs(emptyReport, outputs, config);
+      printEmptyStateHint();
       return;
     }
 
@@ -341,6 +345,22 @@ async function fetchSessionsForErrors(
     if (!out.has(error.id)) out.set(error.id, null);
   }
   return out;
+}
+
+/**
+ * Print the empty-state hint to stderr.
+ *
+ * Kept on stderr (not stdout) so JSON consumers still get a clean parseable
+ * report on stdout while the user gets a usability nudge in their terminal.
+ * The wording matches the suggestion in the README so the user has one place
+ * to look up the wider-window flag without reading the help output.
+ */
+function printEmptyStateHint(): void {
+  process.stderr.write(
+    chalk.yellow(
+      "No issues found. Try `crashscope triage --since 7d`, or generate test data with the harness at examples/test-app/.\n",
+    ),
+  );
 }
 
 /**
