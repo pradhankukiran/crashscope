@@ -43,7 +43,7 @@ crashscope triage --json | jq .
 
 | Command                  | What it does                                                    |
 | ------------------------ | --------------------------------------------------------------- |
-| `crashscope init`        | Interactive setup wizard. Validates credentials and writes a chmod-600 config. |
+| `crashscope init`        | Interactive setup wizard. Validates required fields are present and writes a chmod-600 config. |
 | `crashscope triage`      | Fetch errors, join with sessions, triage with Claude, deliver to configured outputs. |
 | `crashscope config show` | Print the current config with credentials masked.               |
 | `crashscope config path` | Print the path crashscope would read or write.                  |
@@ -149,6 +149,21 @@ has been revoked. Generate a new one in your Slack workspace and re-run
 **LogRocket / Bugsnag returns empty results** — both providers gate parts of
 their API behind plan tiers. Run with `--debug` to capture the raw response
 in `~/.crashscope/debug.log` (with secrets redacted).
+
+**`No issues found`** — your window may be too narrow or your filters too
+strict. Try widening with `--since 7d`, or generate synthetic data with the
+[test harness](../../examples/test-app/README.md) and re-run.
+
+**Claude SDK timeouts / hangs** — re-run with `--debug` and inspect
+`~/.crashscope/debug.log` (the path is the same on all platforms, regardless
+of `$XDG_CONFIG_HOME`).
+
+## Server: Slack `/triage`, REST API
+
+The CLI is the primary surface. If your team also wants a Slack `/triage`
+command or an HTTP endpoint, deploy the optional Next.js server — same
+adapters, same investigation loop. See
+[`packages/server/README.md`](../server/README.md) for setup.
 
 ## License
 
