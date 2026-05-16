@@ -1,11 +1,7 @@
 import { z, type ZodTypeAny } from "zod";
 
-import {
-  AdapterError,
-  AuthError,
-  ValidationError,
-  classifyHttpFailure,
-} from "../../errors.js";
+import { AdapterError, ValidationError } from "../../errors.js";
+import { adapterFetch } from "./_shared.js";
 import {
   normalizedErrorSchema,
   type NormalizedError,
@@ -51,11 +47,6 @@ const MAX_BREADCRUMBS = 10;
  * now means "I have attempts left".
  */
 const MAX_ATTEMPTS = 4;
-
-/**
- * Base delay (ms) for exponential backoff between retries.
- */
-const BACKOFF_BASE_MS = 250;
 
 /**
  * Construction options for {@link RollbarAdapter}.
@@ -409,89 +400,26 @@ export class RollbarAdapter implements ErrorAdapter {
   }
 
   /**
-   * Execute a GET against Rollbar.
-   *
-   * - 401/403 → {@link AuthError} (terminal — never retried).
-   * - 429    → retryable, honors `Retry-After` (seconds or HTTP-date).
-   * - 5xx    → retryable, exponential backoff + jitter.
-   * - other  → non-retryable {@link AdapterError}.
-   *
-   * Validates the JSON body against `schema`; mismatches surface as
-   * {@link ValidationError}.
+   * Thin wrapper over the shared {@link adapterFetch} helper that supplies
+   * Rollbar's `X-Rollbar-Access-Token` header. All HTTP retry / auth /
+   * validation semantics live in the shared helper.
    */
   private async rollbarGet<TSchema extends ZodTypeAny>(
     path: string,
     schema: TSchema,
   ): Promise<z.infer<TSchema>> {
-    const url = `${this.baseUrl}${path}`;
-    let lastError: unknown;
-
-    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
-      let response: Response;
-      try {
-        response = await fetch(url, {
-          method: "GET",
-          headers: {
-            "X-Rollbar-Access-Token": this.readToken,
-            Accept: "application/json",
-          },
-        });
-      } catch (err) {
-        // Network-level failure. Treat as retryable.
-        lastError = err;
-        if (attempt + 1 >= MAX_ATTEMPTS) {
-          throw new AdapterError(
-            "rollbar",
-            `network error calling ${path}: ${describeError(err)}`,
-            { cause: err, retryable: true },
-          );
-        }
-        await sleep(backoffDelay(attempt));
-        continue;
-      }
-
-      if (response.ok) {
-        const json: unknown = await response.json();
-        const parsed = schema.safeParse(json);
-        if (!parsed.success) {
-          throw new ValidationError(
-            `[rollbar] response shape mismatch for ${path}`,
-            parsed.error,
-          );
-        }
-        return parsed.data;
-      }
-
-      // Non-2xx. Use the shared classifier so 401/403 surfaces as AuthError
-      // and the retryable bit lives on AdapterError.
-      const snippet = await safeBodySnippet(response);
-      const classified = classifyHttpFailure(
-        "rollbar",
-        response.status,
-        `${path} ${snippet}`.trim(),
-      );
-
-      if (classified instanceof AuthError) {
-        throw classified;
-      }
-      if (!(classified instanceof AdapterError) || !classified.retryable) {
-        throw classified;
-      }
-      lastError = classified;
-      if (attempt + 1 >= MAX_ATTEMPTS) {
-        throw classified;
-      }
-      const retryAfterMs = parseRetryAfter(response.headers.get("retry-after"));
-      await sleep(retryAfterMs ?? backoffDelay(attempt));
-    }
-
-    throw new AdapterError(
-      "rollbar",
-      `GET ${path} failed after ${MAX_ATTEMPTS} attempts`,
+    return adapterFetch(
+      `${this.baseUrl}${path}`,
+      schema,
       {
-        retryable: true,
-        ...(lastError instanceof Error ? { cause: lastError } : {}),
+        method: "GET",
+        headers: {
+          "X-Rollbar-Access-Token": this.readToken,
+          Accept: "application/json",
+        },
       },
+      "rollbar",
+      { maxAttempts: MAX_ATTEMPTS },
     );
   }
 }
@@ -629,53 +557,8 @@ function clampLimit(limit: number | undefined): number {
   return Math.min(MAX_LIMIT, Math.max(1, floored));
 }
 
-function backoffDelay(attempt: number): number {
-  const safeAttempt = Math.max(0, Math.min(attempt, 6));
-  const base = BACKOFF_BASE_MS * 2 ** safeAttempt;
-  const jitter = Math.random() * BACKOFF_BASE_MS;
-  return base + jitter;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
-}
-
-/**
- * Parse an HTTP `Retry-After` header (delta-seconds or HTTP-date) into a
- * millisecond delay. Returns `null` when the header is missing or unparseable.
- */
-function parseRetryAfter(header: string | null): number | null {
-  if (!header) return null;
-  const trimmed = header.trim();
-  if (trimmed.length === 0) return null;
-  const seconds = Number(trimmed);
-  if (Number.isFinite(seconds)) {
-    return Math.max(0, seconds * 1000);
-  }
-  const dateMs = Date.parse(trimmed);
-  if (Number.isFinite(dateMs)) {
-    return Math.max(0, dateMs - Date.now());
-  }
-  return null;
-}
-
-function describeError(err: unknown): string {
-  if (err instanceof Error) return err.message;
-  if (typeof err === "string") return err;
-  try {
-    return JSON.stringify(err);
-  } catch {
-    return "<unserializable error>";
-  }
-}
-
-async function safeBodySnippet(response: Response): Promise<string> {
-  try {
-    const text = await response.text();
-    return text.slice(0, 200);
-  } catch {
-    return "";
-  }
-}
+// `backoffDelay`, `sleep`, `parseRetryAfter`, `describeError`, and
+// `safeBodySnippet` previously lived here to support an in-file retry loop.
+// After the refactor onto the shared {@link adapterFetch} helper, every
+// wire-level concern lives in `_shared.ts` and these helpers became dead
+// code.

@@ -1,11 +1,7 @@
 import { z, type ZodTypeAny } from "zod";
 
-import {
-  AdapterError,
-  AuthError,
-  ValidationError,
-  classifyHttpFailure,
-} from "../../errors.js";
+import { AdapterError, AuthError, ValidationError } from "../../errors.js";
+import { adapterFetch } from "./_shared.js";
 import type {
   ErrorAdapter,
   FetchRecentOptions,
@@ -53,7 +49,6 @@ const MAX_LIMIT = 100;
  * matches what the loop guard actually measures.
  */
 const MAX_ATTEMPTS = 4;
-const BASE_BACKOFF_MS = 250;
 const MAX_BREADCRUMBS = 10;
 const MAX_STACK_FRAMES = 20;
 
@@ -493,126 +488,20 @@ export class BugsnagAdapter implements ErrorAdapter {
     path: string,
     schema: TSchema,
   ): Promise<z.infer<TSchema>> {
-    const url = `${this.baseUrl}${path}`;
-    let lastError: unknown;
-    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
-      let response: Response;
-      try {
-        response = await fetch(url, {
-          method: "GET",
-          headers: {
-            Authorization: `token ${this.token}`,
-            "X-Version": "2",
-            Accept: "application/json",
-          },
-        });
-      } catch (cause) {
-        lastError = cause;
-        if (attempt + 1 >= MAX_ATTEMPTS) {
-          throw new AdapterError(
-            PROVIDER,
-            `network error calling ${path}: ${String(
-              (cause as Error)?.message ?? cause,
-            )}`,
-            { cause, retryable: true },
-          );
-        }
-        await this.sleep(this.backoffMs(attempt));
-        continue;
-      }
-
-      if (response.ok) {
-        let json: unknown;
-        try {
-          json = await response.json();
-        } catch (cause) {
-          throw new AdapterError(
-            PROVIDER,
-            `invalid JSON from ${path}`,
-            { cause },
-          );
-        }
-        const parsed = schema.safeParse(json);
-        if (!parsed.success) {
-          throw new ValidationError(
-            `[bugsnag] response schema mismatch at ${path}`,
-            parsed.error,
-          );
-        }
-        return parsed.data;
-      }
-
-      const bodyPreview = await this.safeReadText(response);
-      const classified = classifyHttpFailure(
-        PROVIDER,
-        response.status,
-        `${path} ${bodyPreview}`.trim(),
-      );
-      if (classified instanceof AuthError) {
-        // Auth failures are terminal — retrying just wastes attempts.
-        throw classified;
-      }
-      if (!(classified instanceof AdapterError) || !classified.retryable) {
-        throw classified;
-      }
-      lastError = classified;
-      if (attempt + 1 >= MAX_ATTEMPTS) {
-        throw classified;
-      }
-      const retryAfter = this.parseRetryAfter(
-        response.headers.get("retry-after"),
-      );
-      await this.sleep(retryAfter ?? this.backoffMs(attempt));
-    }
-    // Defensive — loop should always return or throw.
-    throw lastError instanceof Error
-      ? lastError
-      : new AdapterError(PROVIDER, `exhausted retries for ${path}`, {
-          retryable: true,
-        });
-  }
-
-  private async safeReadText(response: Response): Promise<string> {
-    try {
-      const text = await response.text();
-      return text.length > 500 ? `${text.slice(0, 500)}...` : text;
-    } catch {
-      return "<no body>";
-    }
-  }
-
-  private parseRetryAfter(header: string | null): number | null {
-    if (!header) {
-      return null;
-    }
-    const seconds = Number(header);
-    if (Number.isFinite(seconds) && seconds >= 0) {
-      return seconds * 1000;
-    }
-    const dateMs = Date.parse(header);
-    if (!Number.isNaN(dateMs)) {
-      const delta = dateMs - Date.now();
-      return delta > 0 ? delta : 0;
-    }
-    return null;
-  }
-
-  /**
-   * Exponential backoff with jitter, expecting a 0-based attempt index.
-   * Capped to prevent the exponent from blowing up if `MAX_ATTEMPTS` is
-   * ever raised.
-   */
-  private backoffMs(attempt: number): number {
-    const safeAttempt = Math.max(0, Math.min(attempt, 6));
-    const exponential = BASE_BACKOFF_MS * 2 ** safeAttempt;
-    const jitter = Math.random() * BASE_BACKOFF_MS;
-    return exponential + jitter;
-  }
-
-  private sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => {
-      setTimeout(resolve, ms);
-    });
+    return adapterFetch(
+      `${this.baseUrl}${path}`,
+      schema,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `token ${this.token}`,
+          "X-Version": "2",
+          Accept: "application/json",
+        },
+      },
+      PROVIDER,
+      { maxAttempts: MAX_ATTEMPTS },
+    );
   }
 }
 

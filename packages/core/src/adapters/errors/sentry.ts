@@ -1,10 +1,7 @@
 import { z } from "zod";
 
-import {
-  AdapterError,
-  ValidationError,
-  classifyHttpFailure,
-} from "../../errors.js";
+import { AdapterError } from "../../errors.js";
+import { adapterFetch } from "./_shared.js";
 import type {
   ErrorAdapter,
   FetchRecentOptions,
@@ -395,12 +392,6 @@ function deriveSourceUrl(issue: SentryIssue, baseUrl: string, org: string): stri
   return `${baseUrl.replace(/\/+$/, "")}/organizations/${encodeURIComponent(org)}/issues/${encodeURIComponent(issue.id)}/`;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
-}
-
 function parseRetryAfter(header: string | null): number | null {
   if (!header) return null;
   const seconds = Number(header);
@@ -570,151 +561,39 @@ export class SentryAdapter implements ErrorAdapter {
     };
   }
 
+  /**
+   * Thin wrapper over the shared {@link adapterFetch} helper that supplies
+   * Sentry's auth header and base URL. All retry / auth / validation
+   * semantics live in the shared helper so every adapter behaves identically.
+   */
   private async sentryGet<T>(
     path: string,
     schema: z.ZodType<T>,
     opts: SentryGetOptions = {},
   ): Promise<T> {
-    const url = `${this.baseUrl}${path}`;
-    const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-
-    let lastError: unknown = null;
-    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-      const controller = new AbortController();
-      const timer = setTimeout(() => {
-        controller.abort();
-      }, timeoutMs);
-
-      let response: Response;
-      try {
-        response = await fetch(url, {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${this.token}`,
-            Accept: "application/json",
-          },
-          signal: controller.signal,
-        });
-      } catch (err) {
-        clearTimeout(timer);
-        lastError = err;
-        if (attempt >= MAX_RETRIES) {
-          throw new AdapterError(
-            PROVIDER,
-            `network error calling ${path}: ${describeError(err)}`,
-            { cause: err, retryable: true },
-          );
-        }
-        await sleep(backoffDelay(attempt));
-        continue;
-      }
-      clearTimeout(timer);
-
-      if (response.status === 401 || response.status === 403) {
-        // Auth failures are terminal: surfacing as AuthError lets the CLI
-        // render a targeted "check credentials" hint instead of a generic
-        // adapter trace, and avoids burning the retry budget on a problem
-        // retries can't fix.
-        const bodyText = await safeReadText(response);
-        throw classifyHttpFailure(
-          PROVIDER,
-          response.status,
-          `${truncate(bodyText, 400)} (path: ${path})`,
-        );
-      }
-
-      if (response.status === 429) {
-        const retryAfterMs =
-          parseRetryAfter(response.headers.get("retry-after")) ??
-          backoffDelay(attempt);
-        if (attempt >= MAX_RETRIES) {
-          throw new AdapterError(
-            PROVIDER,
-            `rate limited (429) calling ${path} after ${MAX_RETRIES + 1} attempts`,
-            { retryable: true },
-          );
-        }
-        await sleep(retryAfterMs);
-        continue;
-      }
-
-      if (response.status >= 500 && response.status < 600) {
-        lastError = new Error(`HTTP ${response.status}`);
-        if (attempt >= MAX_RETRIES) {
-          throw new AdapterError(
-            PROVIDER,
-            `server error ${response.status} calling ${path} after ${MAX_RETRIES + 1} attempts`,
-            { retryable: true },
-          );
-        }
-        await sleep(backoffDelay(attempt));
-        continue;
-      }
-
-      if (!response.ok) {
-        const bodyText = await safeReadText(response);
-        throw classifyHttpFailure(
-          PROVIDER,
-          response.status,
-          `${truncate(bodyText, 400)} (path: ${path})`,
-        );
-      }
-
-      let json: unknown;
-      try {
-        json = await response.json();
-      } catch (err) {
-        throw new AdapterError(
-          PROVIDER,
-          `invalid JSON response from ${path}: ${describeError(err)}`,
-          { cause: err },
-        );
-      }
-
-      const parsed = schema.safeParse(json);
-      if (!parsed.success) {
-        throw new ValidationError(
-          `[${PROVIDER}] response from ${path} failed schema validation`,
-          parsed.error,
-        );
-      }
-      return parsed.data;
-    }
-
-    // Unreachable in practice — the loop either returns or throws.
-    throw new AdapterError(
-      PROVIDER,
-      `exhausted retries calling ${path}: ${describeError(lastError)}`,
+    return adapterFetch(
+      `${this.baseUrl}${path}`,
+      schema,
       {
-        retryable: true,
-        ...(lastError instanceof Error ? { cause: lastError } : {}),
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${this.token}`,
+          Accept: "application/json",
+        },
+      },
+      PROVIDER,
+      {
+        maxAttempts: MAX_RETRIES + 1,
+        ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
       },
     );
   }
 }
 
-async function safeReadText(response: Response): Promise<string> {
-  try {
-    return await response.text();
-  } catch {
-    return "";
-  }
-}
-
-function truncate(value: string, max: number): string {
-  if (value.length <= max) return value;
-  return `${value.slice(0, max)}…`;
-}
-
-function describeError(err: unknown): string {
-  if (err instanceof Error) return err.message;
-  if (typeof err === "string") return err;
-  try {
-    return JSON.stringify(err);
-  } catch {
-    return "<unserializable error>";
-  }
-}
+// `sleep`, `safeReadText`, `truncate`, and `describeError` previously lived
+// here as supporting helpers for an in-file `sentryGet` HTTP loop. After the
+// refactor onto the shared {@link adapterFetch} helper they are no longer
+// needed: every wire-level concern lives in `_shared.ts`.
 
 // Internal exports for testing. Not re-exported from the package barrel.
 export const __internal = {

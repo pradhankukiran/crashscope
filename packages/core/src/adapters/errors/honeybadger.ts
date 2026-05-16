@@ -1,11 +1,7 @@
-import { z, type ZodError, type ZodTypeAny } from "zod";
+import { z, type ZodTypeAny } from "zod";
 
-import {
-  AdapterError,
-  AuthError,
-  ValidationError,
-  classifyHttpFailure,
-} from "../../errors.js";
+import { AdapterError, AuthError, ValidationError } from "../../errors.js";
+import { adapterFetch } from "./_shared.js";
 import type {
   ErrorAdapter,
   FetchRecentOptions,
@@ -35,7 +31,6 @@ const DEFAULT_LIMIT = 25;
  * stampede simultaneously.
  */
 const MAX_ATTEMPTS = 4;
-const BASE_BACKOFF_MS = 250;
 
 /**
  * Maximum number of stack frames emitted into the normalized representation.
@@ -190,17 +185,6 @@ const honeybadgerNoticeListSchema = z
   .passthrough();
 
 /**
- * Sleep helper that resolves after `ms` milliseconds.
- *
- * Kept module-private so tests can stub `globalThis.setTimeout` if needed.
- */
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
-}
-
-/**
  * Base64-encode a UTF-8 string in a way that works on Node and edge runtimes.
  *
  * Node 20+ exposes a global `btoa`; some older runtimes only have `Buffer`.
@@ -215,24 +199,10 @@ function encodeBasicAuthHeader(token: string): string {
   return `Basic ${Buffer.from(raw, "utf8").toString("base64")}`;
 }
 
-/**
- * Parse an HTTP `Retry-After` header (delta-seconds or HTTP-date) into a
- * millisecond delay. Returns `null` when the header is missing or unparseable.
- */
-function parseRetryAfter(header: string | null): number | null {
-  if (!header) return null;
-  const trimmed = header.trim();
-  if (trimmed.length === 0) return null;
-  const seconds = Number(trimmed);
-  if (Number.isFinite(seconds)) {
-    return Math.max(0, seconds * 1000);
-  }
-  const dateMs = Date.parse(trimmed);
-  if (Number.isFinite(dateMs)) {
-    return Math.max(0, dateMs - Date.now());
-  }
-  return null;
-}
+// `sleep` and `parseRetryAfter` previously lived here as supporting helpers
+// for an in-file HTTP retry loop. After the refactor onto the shared
+// {@link adapterFetch} helper both became dead code (handled inside
+// `_shared.ts`).
 
 /**
  * True when a value is a syntactically valid absolute URL.
@@ -566,100 +536,22 @@ export class HoneybadgerAdapter implements ErrorAdapter {
     path: string,
     schema: S,
   ): Promise<z.infer<S>> {
-    const url = `${this.baseUrl}${path}`;
-    let lastErr: unknown;
-
-    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
-      let response: Response;
-      try {
-        response = await fetch(url, {
-          method: "GET",
-          headers: {
-            Accept: "application/json",
-            Authorization: this.authHeader,
-          },
-        });
-      } catch (err) {
-        // Network-level failure (DNS, connection reset, etc). Retryable.
-        lastErr = err;
-        if (attempt + 1 >= MAX_ATTEMPTS) {
-          throw new AdapterError(
-            this.name,
-            `network error calling ${path}: ${describeError(err)}`,
-            { cause: err, retryable: true },
-          );
-        }
-        await sleep(backoffDelay(attempt));
-        continue;
-      }
-
-      if (response.ok) {
-        const json: unknown = await response.json();
-        const parsed = schema.safeParse(json);
-        if (!parsed.success) {
-          throw new ValidationError(
-            `[${this.name}] response from ${path} failed schema validation`,
-            parsed.error as ZodError,
-          );
-        }
-        return parsed.data as z.infer<S>;
-      }
-
-      const body = await response.text().catch(() => "");
-      const classified = classifyHttpFailure(
-        this.name,
-        response.status,
-        `GET ${path} HTTP ${response.status}${
-          body ? `: ${body.slice(0, 256)}` : ""
-        }`,
-      );
-
-      // AuthError is terminal — retrying just wastes attempts.
-      if (classified instanceof AuthError) {
-        throw classified;
-      }
-      // Trust the new structured `retryable` field rather than substring-
-      // matching on the message (which broke if anyone tweaked wording).
-      if (!(classified instanceof AdapterError) || !classified.retryable) {
-        throw classified;
-      }
-      lastErr = classified;
-      if (attempt + 1 >= MAX_ATTEMPTS) {
-        throw classified;
-      }
-      const retryAfterMs = parseRetryAfter(
-        response.headers.get("retry-after"),
-      );
-      await sleep(retryAfterMs ?? backoffDelay(attempt));
-    }
-
-    throw new AdapterError(
-      this.name,
-      `GET ${path} failed after ${MAX_ATTEMPTS} attempts`,
+    return adapterFetch(
+      `${this.baseUrl}${path}`,
+      schema,
       {
-        retryable: true,
-        ...(lastErr instanceof Error ? { cause: lastErr } : {}),
+        method: "GET",
+        headers: {
+          Accept: "application/json",
+          Authorization: this.authHeader,
+        },
       },
+      this.name,
+      { maxAttempts: MAX_ATTEMPTS },
     );
   }
 }
 
-/**
- * Exponential backoff with full jitter, expecting a 0-based attempt index.
- * Capped to keep the exponent reasonable if `MAX_ATTEMPTS` is ever raised.
- */
-function backoffDelay(attempt: number): number {
-  const safeAttempt = Math.max(0, Math.min(attempt, 6));
-  const ceiling = BASE_BACKOFF_MS * 2 ** safeAttempt;
-  return Math.floor(Math.random() * ceiling);
-}
-
-function describeError(err: unknown): string {
-  if (err instanceof Error) return err.message;
-  if (typeof err === "string") return err;
-  try {
-    return JSON.stringify(err);
-  } catch {
-    return "<unserializable error>";
-  }
-}
+// `backoffDelay` and `describeError` were removed when honeybadgerGet moved
+// onto the shared {@link adapterFetch} helper. Their concerns now live in
+// `_shared.ts`.
