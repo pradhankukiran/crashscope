@@ -25,8 +25,25 @@ export interface InvestigateInput {
   model?: string;
   /** Max concurrent in-flight investigations. Default 3. */
   maxConcurrent?: number;
+  /**
+   * Hard cap on number of issues investigated in one batch. Anything beyond
+   * this is sliced off (oldest order preserved) and announced via
+   * {@link InvestigateInput.onWarning}. Default {@link DEFAULT_MAX_ISSUES}.
+   */
+  maxIssues?: number;
+  /**
+   * Per-call timeout in milliseconds. Each individual Claude call is wrapped
+   * in a timeout-aware {@link AbortSignal}. Defaults to
+   * {@link DEFAULT_PER_ISSUE_TIMEOUT_MS}.
+   */
+  perIssueTimeoutMs?: number;
   /** Cancellation signal forwarded to the SDK. */
   signal?: AbortSignal;
+  /**
+   * Optional callback for non-fatal warnings (e.g. "input clipped to N issues").
+   * Don't silently drop work — surface it so the caller can log or display it.
+   */
+  onWarning?: (msg: string) => void;
 }
 
 /**
@@ -51,6 +68,20 @@ const RETRY_DELAYS_MS = [1_000, 3_000, 9_000] as const;
 
 /** HTTP status codes we consider transient and worth retrying. */
 const TRANSIENT_STATUSES = new Set([429, 500, 502, 503, 504]);
+
+/**
+ * Default cap on the number of issues investigated in a single batch. Sized
+ * to absorb a typical "last 24h" window from a small/medium service while
+ * still bounding Anthropic spend. Override via
+ * {@link InvestigateInput.maxIssues}.
+ */
+const DEFAULT_MAX_ISSUES = 100;
+
+/**
+ * Default per-call timeout (2 minutes). Sonnet under tool use rarely needs
+ * this long; the timeout is a backstop against hung streams, not normal latency.
+ */
+const DEFAULT_PER_ISSUE_TIMEOUT_MS = 120_000;
 
 /**
  * Tiny semaphore — limits concurrent investigations without pulling in
@@ -160,6 +191,42 @@ function makeAbortController(external?: AbortSignal): AbortController {
 }
 
 /**
+ * Combine a user-supplied signal with a per-call timeout signal. We can't
+ * rely on `AbortSignal.any` being available everywhere (Node 18 LTS lacked
+ * it), so we DIY when needed. `AbortSignal.timeout` is in Node 17.3+ which
+ * is below our floor, so we use it directly.
+ */
+function combineSignals(
+  userSignal: AbortSignal | undefined,
+  timeoutMs: number,
+): AbortSignal {
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  if (!userSignal) return timeoutSignal;
+  // Prefer the platform implementation when present.
+  const anyFn = (
+    AbortSignal as unknown as {
+      any?: (signals: AbortSignal[]) => AbortSignal;
+    }
+  ).any;
+  if (typeof anyFn === "function") {
+    return anyFn([userSignal, timeoutSignal]);
+  }
+  // Manual fallback: forward whichever fires first.
+  const controller = new AbortController();
+  const forward = (reason: unknown): void => {
+    if (!controller.signal.aborted) controller.abort(reason);
+  };
+  if (userSignal.aborted) forward(userSignal.reason);
+  else userSignal.addEventListener("abort", () => forward(userSignal.reason), { once: true });
+  if (timeoutSignal.aborted) forward(timeoutSignal.reason);
+  else
+    timeoutSignal.addEventListener("abort", () => forward(timeoutSignal.reason), {
+      once: true,
+    });
+  return controller.signal;
+}
+
+/**
  * Z-shaped raw shape mirror of {@link triageFindingSchema} for the SDK tool().
  *
  * The SDK accepts either zod v3 or v4 raw shapes; we keep this in v3 since
@@ -187,9 +254,11 @@ async function runOnce(
   auth: AuthResolution,
   model: string,
   signal: AbortSignal | undefined,
+  perIssueTimeoutMs: number,
 ): Promise<TriageFinding> {
   let captured: TriageFinding | null = null;
-  const controller = makeAbortController(signal);
+  const combinedSignal = combineSignals(signal, perIssueTimeoutMs);
+  const controller = makeAbortController(combinedSignal);
 
   const mcpServer = createSdkMcpServer({
     name: MCP_SERVER_NAME,
@@ -291,6 +360,7 @@ async function investigateOne(
   auth: AuthResolution,
   model: string,
   signal: AbortSignal | undefined,
+  perIssueTimeoutMs: number,
 ): Promise<TriageFinding | { error: string }> {
   let lastErr: unknown = null;
   for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
@@ -300,7 +370,7 @@ async function investigateOne(
       };
     }
     try {
-      return await runOnce(error, session, auth, model, signal);
+      return await runOnce(error, session, auth, model, signal, perIssueTimeoutMs);
     } catch (err: unknown) {
       lastErr = err;
       if (err instanceof ValidationError) {
@@ -381,15 +451,40 @@ function assembleIssue(
  * Concurrency: at most `maxConcurrent` calls in flight at once (default 3).
  * Each error gets its own retry loop; one failure never blocks others.
  *
+ * Input volume is bounded by `maxIssues` (default {@link DEFAULT_MAX_ISSUES}).
+ * Excess is sliced off and surfaced via `onWarning` rather than silently
+ * dropped — callers should always see when work was clipped.
+ *
  * The returned array is in the same order as `input.errors` so downstream
  * formatters can rely on input ordering.
  */
 export async function investigate(
   input: InvestigateInput,
 ): Promise<TriageIssue[]> {
-  const { errors, sessions, auth, signal } = input;
+  const { sessions, auth, signal, onWarning } = input;
   const model = input.model ?? DEFAULT_MODEL;
   const maxConcurrent = Math.max(1, input.maxConcurrent ?? 3);
+  const maxIssues = Math.max(1, input.maxIssues ?? DEFAULT_MAX_ISSUES);
+  const perIssueTimeoutMs = Math.max(
+    1_000,
+    input.perIssueTimeoutMs ?? DEFAULT_PER_ISSUE_TIMEOUT_MS,
+  );
+
+  let errors = input.errors;
+  if (errors.length > maxIssues) {
+    const dropped = errors.length - maxIssues;
+    const warn =
+      `crashscope: investigating only the first ${maxIssues} of ` +
+      `${errors.length} errors (${dropped} dropped). Raise maxIssues to ` +
+      `process more, or paginate upstream.`;
+    if (onWarning) {
+      onWarning(warn);
+    } else {
+      console.warn(`[crashscope/agent] ${warn}`);
+    }
+    errors = errors.slice(0, maxIssues);
+  }
+
   const sem = createSemaphore(maxConcurrent);
 
   const tasks = errors.map(async (error) => {
@@ -402,6 +497,7 @@ export async function investigate(
         auth,
         model,
         signal,
+        perIssueTimeoutMs,
       );
       return assembleIssue(error, session, finding);
     } finally {
