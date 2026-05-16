@@ -52,6 +52,14 @@ export const dynamic = "force-dynamic";
 // Vercel max function duration. Adapter+investigate work can take a while.
 export const maxDuration = 300;
 
+/**
+ * Maximum accepted body size for `POST /api/triage`. The realistic payload
+ * (credentials, options, anthropic key) sits well under 4 KB; 16 KB leaves
+ * headroom for slightly verbose tokens without inviting attackers to stream
+ * gigabytes of garbage at the JSON parser.
+ */
+const MAX_BODY_BYTES = 16 * 1024;
+
 const VALID_SEVERITIES: ReadonlySet<Severity> = new Set<Severity>([
   "fatal",
   "error",
@@ -423,7 +431,31 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  // 1. Body parse.
+  // 1. Body size cap. The body should comfortably fit in a few KB (provider
+  //    creds + opts), and we never need megabytes here. Reject *before*
+  //    reading the body so a malicious client can't stream gigabytes at us.
+  //    Header is checked first; if it's missing we let `.json()` enforce a
+  //    soft cap by aborting if it exceeds the limit.
+  const contentLength = req.headers.get("content-length");
+  if (contentLength !== null) {
+    const len = Number(contentLength);
+    if (!Number.isFinite(len) || len < 0) {
+      return errorResponse(400, {
+        error: "BAD_REQUEST",
+        message: "Invalid Content-Length header.",
+        requestId,
+      });
+    }
+    if (len > MAX_BODY_BYTES) {
+      return errorResponse(413, {
+        error: "PAYLOAD_TOO_LARGE",
+        message: `Request body exceeds ${MAX_BODY_BYTES} bytes.`,
+        requestId,
+      });
+    }
+  }
+
+  // 2. Body parse.
   let json: unknown;
   try {
     json = await req.json();
@@ -435,7 +467,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     });
   }
 
-  // 2. Schema + cross-field validation.
+  // 3. Schema + cross-field validation.
   const parsed = parseTriageBody(json);
   if (!parsed.ok) {
     return errorResponse(400, {
@@ -445,7 +477,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     });
   }
 
-  // 3. Anthropic key is mandatory for this endpoint. The schema already
+  // 4. Anthropic key is mandatory for this endpoint. The schema already
   //    enforces non-empty, but we double-check here so the error message is
   //    explicit instead of a generic schema complaint.
   if (!parsed.body.anthropic.apiKey.trim()) {
@@ -457,7 +489,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     });
   }
 
-  // 4. Pipeline.
+  // 5. Pipeline.
   console.info(
     `[triage:post] start requestId=${requestId} errorProvider=${parsed.body.errorProvider} sessionProvider=${parsed.body.sessionProvider} since=${parsed.body.opts.since} limit=${parsed.body.opts.limit}`,
   );
