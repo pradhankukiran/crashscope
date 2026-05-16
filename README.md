@@ -119,6 +119,8 @@ crashscope triage --json | jq .
 
 The wizard validates required fields are present. Full command and flag reference: [packages/cli/README.md](packages/cli/README.md).
 
+Don't have errors in your Sentry yet? Generate test data with the [test harness](examples/test-app/README.md).
+
 > We will publish to npm once every adapter has been verified against a live account.
 
 ## For teams: deploy the server (optional)
@@ -152,11 +154,10 @@ If you're going down the server path, note that serverless functions have no acc
 crashscope/
 ├── packages/
 │   ├── core/      # @crashscope/core — types, Zod schemas, agent loop, 4 error + 2 session adapters
-│   ├── cli/       # crashscope — npm-installable CLI; commands: init, triage, config
+│   ├── cli/       # crashscope — CLI; commands: init, triage, config (install from source for now)
 │   └── server/    # @crashscope/server — Next.js app: landing page, REST /api/triage, Slack bot
 ├── examples/
 │   └── test-app/  # static HTML harness for generating matched Sentry + PostHog test data
-├── assets/        # branding assets
 ├── pnpm-workspace.yaml
 ├── tsconfig.base.json
 └── package.json   # workspace root
@@ -223,7 +224,11 @@ Content-Type: application/json
   "opts":        { "since": "24h", "limit": 25 } }
 ```
 
-Both return a `TriageReport` JSON object (typed in `@crashscope/core`). `since` accepts `1h | 6h | 24h | 7d | 14d | 30d`. `limit` defaults to 25, max 100. `severity` is a comma-separated subset of `fatal,error,warning,info`. Errors return `{ error, message, requestId }`; an `X-Request-Id` header is set on every response for log correlation. Full status-code table in [packages/server/README.md](packages/server/README.md#rest-api).
+Both return a `TriageReport` JSON object (typed in `@crashscope/core`). `since` accepts `1h | 6h | 24h | 7d | 14d | 30d`. `severity` is a comma-separated subset of `fatal,error,warning,info`. Errors return `{ error, message, requestId }`; an `X-Request-Id` header is set on every response for log correlation. Full status-code table in [packages/server/README.md](packages/server/README.md#rest-api).
+
+**Limit caps differ by endpoint.** `GET /api/triage` accepts `limit` up to **100** (default 25). `POST /api/triage` caps `opts.limit` at **25** — the public demo path is intentionally tighter than the bearer-authed GET. Requests above the cap return `400 Bad Request`.
+
+**`POST /api/triage` is intentionally unauthenticated** for the public demo path: visitors paste their own provider credentials and Anthropic key in the request body, the server uses them transiently for a single triage, and nothing is persisted. The GET endpoint still requires `Authorization: Bearer <CRASHSCOPE_API_TOKEN>`.
 
 ## Tech stack
 
