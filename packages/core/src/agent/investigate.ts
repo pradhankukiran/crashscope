@@ -66,9 +66,6 @@ const ALLOWED_TOOL_NAME = `mcp__${MCP_SERVER_NAME}__emit_triage_finding`;
 /** Retry plan: 1s, 3s, 9s with up to ±20% jitter, then give up. */
 const RETRY_DELAYS_MS = [1_000, 3_000, 9_000] as const;
 
-/** HTTP status codes we consider transient and worth retrying. */
-const TRANSIENT_STATUSES = new Set([429, 500, 502, 503, 504]);
-
 /**
  * Default cap on the number of issues investigated in a single batch. Sized
  * to absorb a typical "last 24h" window from a small/medium service while
@@ -82,6 +79,22 @@ const DEFAULT_MAX_ISSUES = 100;
  * this long; the timeout is a backstop against hung streams, not normal latency.
  */
 const DEFAULT_PER_ISSUE_TIMEOUT_MS = 120_000;
+
+/**
+ * Specific marker we throw when Claude ends a turn without invoking the
+ * triage tool. Recognised by the retry loop so this particular failure can be
+ * retried at most once before giving up.
+ */
+const NO_TOOL_USE_MESSAGE =
+  "Claude completed without calling emit_triage_finding";
+
+/**
+ * Matches HTTP status codes embedded in plain error messages. The agent SDK
+ * surfaces transport failures as `Error` whose message contains the status
+ * like "Anthropic API 429 …" — match on word boundaries so we don't get
+ * spurious hits on substring matches like "504" inside a request ID.
+ */
+const TRANSIENT_STATUS_REGEX = /\b(?:429|500|502|503|504)\b/;
 
 /**
  * Tiny semaphore — limits concurrent investigations without pulling in
@@ -120,25 +133,40 @@ function createSemaphore(max: number): {
  * The agent SDK surfaces transport errors as plain `Error`s whose messages
  * contain HTTP status codes (e.g. "Anthropic API 429..."). It also surfaces
  * abort/cancellation, which we never retry.
+ *
+ * Status detection uses word-boundary regex on `String(err)` so we don't get
+ * false positives from arbitrary digits in request IDs.
  */
 function isTransientError(err: unknown): boolean {
   if (err instanceof Error) {
     if (err.name === "AbortError") return false;
     const message = err.message.toLowerCase();
     if (message.includes("aborted")) return false;
-    for (const code of TRANSIENT_STATUSES) {
-      if (message.includes(String(code))) return true;
-    }
-    // Network blips and generic fetch failures are also worth one more try.
-    if (
-      message.includes("econnreset") ||
-      message.includes("etimedout") ||
-      message.includes("network") ||
-      message.includes("fetch failed") ||
-      message.includes("socket hang up")
-    ) {
-      return true;
-    }
+  }
+  const text = String(err);
+  if (TRANSIENT_STATUS_REGEX.test(text)) return true;
+  const lower = text.toLowerCase();
+  // Network blips and generic fetch failures are also worth one more try.
+  if (
+    lower.includes("econnreset") ||
+    lower.includes("etimedout") ||
+    lower.includes("network") ||
+    lower.includes("fetch failed") ||
+    lower.includes("socket hang up")
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * True when the error is the specific "Claude ended without calling the tool"
+ * failure. We retry it at most once because the model occasionally drifts and
+ * a fresh attempt with the same prompt usually succeeds.
+ */
+function isNoToolUseError(err: unknown): boolean {
+  if (err instanceof Error) {
+    return err.message.includes(NO_TOOL_USE_MESSAGE);
   }
   return false;
 }
@@ -338,10 +366,7 @@ async function runOnce(
   }
 
   if (!captured) {
-    throw new Error(
-      lastErrorMessage ??
-        "Claude completed without calling emit_triage_finding.",
-    );
+    throw new Error(lastErrorMessage ?? `${NO_TOOL_USE_MESSAGE}.`);
   }
   return captured;
 }
@@ -350,8 +375,10 @@ async function runOnce(
  * Run a Claude investigation for one error with retry on transient failures.
  *
  * Retries:
- * - 3 attempts total ({@link RETRY_DELAYS_MS}).
- * - Only retries when {@link isTransientError} returns true.
+ * - 3 backoff slots ({@link RETRY_DELAYS_MS}) for transient transport errors.
+ * - The specific "completed without calling emit_triage_finding" failure is
+ *   retried at most once, regardless of attempt index — beyond that the model
+ *   is clearly stuck and looping wastes spend.
  * - Aborts immediately when the caller's signal fires.
  */
 async function investigateOne(
@@ -363,6 +390,7 @@ async function investigateOne(
   perIssueTimeoutMs: number,
 ): Promise<TriageFinding | { error: string }> {
   let lastErr: unknown = null;
+  let noToolUseRetries = 0;
   for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
     if (signal?.aborted) {
       return {
@@ -377,7 +405,13 @@ async function investigateOne(
         // Validation issues are not transient — fail fast.
         return { error: `Tool output validation failed: ${err.message}` };
       }
-      if (!isTransientError(err) || attempt === RETRY_DELAYS_MS.length) {
+      const noToolUse = isNoToolUseError(err);
+      if (noToolUse && noToolUseRetries < 1) {
+        noToolUseRetries++;
+        // Fall through into the backoff sleep below using the current
+        // attempt's delay. If we've exhausted backoff slots, break.
+        if (attempt === RETRY_DELAYS_MS.length) break;
+      } else if (!isTransientError(err) || attempt === RETRY_DELAYS_MS.length) {
         break;
       }
       const delay = RETRY_DELAYS_MS[attempt];
