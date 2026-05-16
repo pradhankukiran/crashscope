@@ -165,6 +165,34 @@ export async function runTriage(options: TriageOptions): Promise<void> {
     const matched = Array.from(sessions.values()).filter((s) => s !== null).length;
     sessionsSpin.succeed(`Matched ${matched}/${errors.length} sessions`);
 
+    // ---- 8a. Dry run --------------------------------------------------------
+    // `--dry-run` skips the Claude investigation step so the user can verify
+    // their config (provider auth, session matching, severity filters) before
+    // spending any LLM tokens. We still emit a report shaped like the regular
+    // path, but every issue carries a placeholder finding so JSON consumers
+    // see the same schema. Slack delivery is silenced because shipping
+    // placeholder findings into a channel would just be noise.
+    if (options.dryRun) {
+      const dryIssues: TriageIssue[] = errors.map((error) =>
+        assembleDryRunIssue(error, sessions.get(error.id) ?? null),
+      );
+      const dryReport = buildReport({
+        issues: dryIssues,
+        config,
+        windowLabel,
+        durationMs: Date.now() - startedAt,
+      });
+      const dryOutputs = outputs.filter((o) => o !== "slack");
+      await emitOutputs(dryReport, dryOutputs, config);
+      await maybeWriteToFile(dryReport, options);
+      process.stderr.write(
+        chalk.yellow(
+          `Dry run — Claude investigation skipped. Listed ${errors.length} errors and ${matched} matched sessions.\n`,
+        ),
+      );
+      return;
+    }
+
     // ---- 8. Investigate with Claude ---------------------------------------
     const investigateSpin = makeSpinner(
       useSpinners,
@@ -358,6 +386,44 @@ async function fetchSessionsForErrors(
     if (!out.has(error.id)) out.set(error.id, null);
   }
   return out;
+}
+
+/**
+ * Build a placeholder {@link TriageIssue} for `--dry-run`.
+ *
+ * The function copies the deterministic fields (severity, title, counts,
+ * URLs) from the source error so the user can see which issues *would* be
+ * investigated, and fills the LLM-derived fields with explicit
+ * "Skipped (dry run)" sentinels so JSON consumers don't confuse the report
+ * with a real investigation.
+ */
+function assembleDryRunIssue(
+  error: NormalizedError,
+  session: NormalizedSession | null,
+): TriageIssue {
+  return {
+    errorId: error.id,
+    severity: error.severity,
+    provider: error.provider,
+    title: error.title,
+    affectedUsers: error.affectedUsers,
+    eventCount: error.eventCount,
+    firstSeen: error.firstSeen,
+    lastSeen: error.lastSeen,
+    environment: error.environment,
+    releaseVersion: error.releaseVersion,
+    sourceUrl: error.sourceUrl,
+    replayUrl: session?.replayUrl ?? null,
+    sessionId: session?.id ?? null,
+    hypothesis: "Skipped (dry run) — re-run without --dry-run to investigate.",
+    rootCauseGuess: "Skipped (dry run).",
+    suggestedFiles: [],
+    userJourney:
+      session
+        ? "Session matched but not analysed because --dry-run was set."
+        : "No session matched for this error.",
+    confidence: "low",
+  };
 }
 
 /**
