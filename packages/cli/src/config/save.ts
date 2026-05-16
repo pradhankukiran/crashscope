@@ -1,4 +1,4 @@
-import { chmod, mkdir, writeFile } from "node:fs/promises";
+import { chmod, mkdir, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import {
   ConfigError,
@@ -19,15 +19,31 @@ import { getConfigPath } from "./paths.js";
 const FILE_MODE = 0o600;
 
 /**
+ * Suffix used for the temporary file written before the atomic rename.
+ *
+ * Keeping the temp file next to the destination guarantees the rename happens
+ * on the same filesystem — `rename(2)` across filesystems is non-atomic. The
+ * `.tmp` extension also discourages other tools (editors, `git`) from picking
+ * the file up as a real config.
+ */
+const TMP_SUFFIX = ".tmp";
+
+/**
  * Persist `config` to disk at `path` (or the canonical location).
  *
  * The function:
  * 1. Re-validates against {@link crashscopeConfigSchema} as a belt-and-braces
  *    check so we never write a config that `loadConfig` would later reject.
  * 2. Creates the containing directory (recursively) if it does not exist.
- * 3. Writes with pretty (2-space) JSON indentation and a trailing newline so
- *    the file plays nicely with `EDITOR` and `git diff`.
- * 4. Chmods the file to {@link FILE_MODE} to keep credentials private.
+ * 3. Writes to `<path>.tmp` with mode {@link FILE_MODE} (chmod is applied
+ *    explicitly because Node honours the process umask on the initial write
+ *    on some platforms).
+ * 4. `fs.rename`s the temp file over the destination. POSIX `rename(2)` is
+ *    atomic for same-filesystem destinations, so a `SIGINT` mid-write leaves
+ *    the previous config intact instead of truncating it.
+ *
+ * On failure we unlink the temp file (best-effort) so a half-written `.tmp`
+ * doesn't accumulate after a partial run.
  */
 export async function saveConfig(
   config: CrashscopeConfig,
@@ -53,13 +69,25 @@ export async function saveConfig(
   }
 
   const body = JSON.stringify(result.data, null, 2) + "\n";
+  const tmp = resolved + TMP_SUFFIX;
   try {
-    await writeFile(resolved, body, { encoding: "utf8", mode: FILE_MODE });
+    await writeFile(tmp, body, { encoding: "utf8", mode: FILE_MODE });
     // chmod is a no-op on platforms (e.g. Windows) that ignore POSIX bits, but
     // calling it remains harmless and ensures correctness on POSIX hosts even
-    // when the file pre-existed with a more permissive mode.
-    await chmod(resolved, FILE_MODE);
+    // when the temp file pre-existed with a more permissive mode.
+    await chmod(tmp, FILE_MODE);
+    // Atomic publish — readers see either the old config or the new one,
+    // never a half-written buffer.
+    await rename(tmp, resolved);
   } catch (err: unknown) {
+    // Best-effort cleanup of the temp file. We swallow ENOENT here because
+    // the temp may never have been created (e.g. EACCES on writeFile) and we
+    // don't want a follow-on error to mask the real one.
+    try {
+      await unlink(tmp);
+    } catch {
+      // Ignore — see comment above.
+    }
     const cause = err instanceof Error ? err : new Error(String(err));
     throw new ConfigError(
       `Failed to write config to ${resolved}: ${cause.message}`,
