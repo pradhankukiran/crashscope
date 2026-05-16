@@ -19,6 +19,7 @@ The triage pipeline runs inside `lib/triage.ts` and is shared by both the REST e
 
 ```bash
 pnpm install          # from the repo root
+pnpm -r build         # build @crashscope/core so the server can import it
 cp packages/server/.env.example packages/server/.env.local
 # edit .env.local with your provider credentials
 pnpm --filter @crashscope/server dev
@@ -104,13 +105,22 @@ Body (validated with Zod, mirroring `crashscopeConfigSchema` from `@crashscope/c
 
 The `anthropic.apiKey` field is mandatory on this endpoint — the server never falls back to its own `ANTHROPIC_API_KEY` env var for the public demo.
 
+> **Limit asymmetry:** `POST /api/triage` caps `opts.limit` at **25** (the public demo path is deliberately tighter than the bearer-authed GET, which caps at 100). Requests above the cap return `400 Bad Request`.
+
 ## Slack setup
 
 1. Create a new Slack app at [api.slack.com/apps](https://api.slack.com/apps).
 2. Under **Slash Commands**, add `/triage` pointing to `https://your-host/api/slack/command`.
-3. Under **Event Subscriptions**, set the request URL to `https://your-host/api/slack/events`. Slack will hit `url_verification`; this endpoint answers it automatically.
-4. Copy the **Signing Secret** into `SLACK_SIGNING_SECRET` and the **Bot User OAuth Token** into `SLACK_BOT_TOKEN`.
-5. Install the app to your workspace.
+3. Under **OAuth & Permissions** → **Scopes** → **Bot Token Scopes**, add:
+   - `commands` — required so Slack can invoke `/triage`.
+   - `chat:write` — reserved for future use (no `chat.postMessage` is called
+     yet; add it now so you don't have to reinstall later).
+
+   No **Redirect URL** is needed — crashscope does not run an OAuth callback;
+   the bot is installed directly to the workspace from the app config page.
+4. Under **Event Subscriptions**, set the request URL to `https://your-host/api/slack/events`. Slack will hit `url_verification`; this endpoint answers it automatically.
+5. Copy the **Signing Secret** into `SLACK_SIGNING_SECRET` and the **Bot User OAuth Token** into `SLACK_BOT_TOKEN`. Note: `SLACK_BOT_TOKEN` is currently reserved for future use — no `chat.postMessage` calls are made yet, but populate it now so richer responses light up the moment they ship.
+6. Install the app to your workspace.
 
 In Slack, run `/triage`, `/triage 7d`, or `/triage 24h severity=fatal,error`.
 
