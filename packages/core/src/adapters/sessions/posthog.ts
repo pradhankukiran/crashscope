@@ -23,6 +23,13 @@ const MAX_RETRIES = 3;
 const RETRY_BASE_DELAY_MS = 300;
 const EVENT_FETCH_LIMIT = 200;
 const RECORDING_FETCH_LIMIT = 10;
+/**
+ * Floor for the events fetch window. When a recording has no `end_time` and a
+ * zero `duration`, `eventsTo === eventsFrom` collapses the search to an empty
+ * range and PostHog returns no events. One minute is generous enough to
+ * surface immediate interactions without widening into the next session.
+ */
+const MIN_EVENT_WINDOW_MS = 60_000;
 
 /* ------------------------------------------------------------------------- */
 /* Zod schemas for PostHog API responses                                      */
@@ -108,6 +115,12 @@ export interface PostHogAdapterOptions {
   projectId: string;
   /** Override the API base. Defaults to `https://app.posthog.com`. */
   host?: string;
+  /**
+   * Optional sink for non-fatal warnings (e.g. ambiguous person resolution,
+   * dropped malformed events). Wired through by callers that want to surface
+   * adapter diagnostics in CLI/server logs without elevating them to errors.
+   */
+  onWarning?: (message: string) => void;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -146,6 +159,7 @@ export class PostHogAdapter implements SessionAdapter {
   private readonly apiKey: string;
   private readonly projectId: string;
   private readonly host: string;
+  private readonly onWarning: ((message: string) => void) | undefined;
 
   public constructor(opts: PostHogAdapterOptions) {
     if (!opts.apiKey) {
@@ -157,6 +171,7 @@ export class PostHogAdapter implements SessionAdapter {
     this.apiKey = opts.apiKey;
     this.projectId = opts.projectId;
     this.host = (opts.host ?? DEFAULT_HOST).replace(/\/+$/g, "");
+    this.onWarning = opts.onWarning;
   }
 
   /** Find the recording closest to `around`, then enrich with person events. */
@@ -209,11 +224,18 @@ export class PostHogAdapter implements SessionAdapter {
     );
 
     // Person events: bounded by the recording window when available, otherwise
-    // by the search window the caller asked for.
+    // by the search window the caller asked for. When the recording lacks an
+    // `end_time` and `duration` is zero (still-open or quickly-terminated
+    // recordings), `eventsTo === eventsFrom` collapses the search to an empty
+    // range. Floor to MIN_EVENT_WINDOW_MS so we surface at least the events
+    // that flank the error itself.
+    const effectiveDurationMs = Math.max(durationMs, MIN_EVENT_WINDOW_MS);
     const eventsFrom = startedAtIso;
     const eventsTo =
       endedAtIso ??
-      new Date(new Date(startedAtIso).getTime() + durationMs).toISOString();
+      new Date(
+        new Date(startedAtIso).getTime() + effectiveDurationMs,
+      ).toISOString();
 
     const eventsPath =
       `/api/projects/${encodeURIComponent(this.projectId)}/events/` +
@@ -271,6 +293,11 @@ export class PostHogAdapter implements SessionAdapter {
    * propagated). Errors are swallowed and returned as null so a missing
    * person never blocks the recording lookup — we fall back to a direct
    * distinct_id filter in that case.
+   *
+   * After re-aliasing (e.g. an anonymous id merged into an identified user)
+   * PostHog can return multiple person rows for one distinct_id query.
+   * Prefer the person whose `distinct_ids` array literally contains the
+   * requested id; only fall back to `results[0]` if none match exactly.
    */
   private async fetchPersonUuid(distinctId: string): Promise<string | null> {
     try {
@@ -278,7 +305,22 @@ export class PostHogAdapter implements SessionAdapter {
         `/api/projects/${encodeURIComponent(this.projectId)}/persons/` +
         `?distinct_id=${encodeURIComponent(distinctId)}`;
       const response = await this.posthogGet(path, personsListResponseSchema);
-      const first = response.results[0];
+      const results = response.results;
+      if (results.length === 0) {
+        return null;
+      }
+      const exact = results.find((p) =>
+        Array.isArray(p.distinct_ids) && p.distinct_ids.includes(distinctId),
+      );
+      if (exact) {
+        return exact.id;
+      }
+      if (results.length > 1 && this.onWarning) {
+        this.onWarning(
+          `[${PROVIDER}] person lookup for distinct_id="${distinctId}" returned ${results.length} candidates; none contained the exact id. Falling back to results[0].`,
+        );
+      }
+      const first = results[0];
       return first ? first.id : null;
     } catch {
       return null;
