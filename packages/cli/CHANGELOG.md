@@ -4,6 +4,14 @@ All notable changes to the `crashscope` CLI are documented in this file. The
 format follows [Conventional Commits](https://www.conventionalcommits.org/) and
 the project adheres to [Semantic Versioning](https://semver.org/).
 
+## 0.1.1
+
+### Fixed
+
+- Upgrade to zod 4 to align with @anthropic-ai/claude-agent-sdk's peer-dep
+  requirement; eliminates the conflicting-peer-dependency warning on
+  `npm install -g`.
+
 ## Unreleased
 
 ### Added
