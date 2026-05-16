@@ -75,7 +75,7 @@ export function DemoSection(): JSX.Element {
           </CardHeader>
           <CardContent className="flex flex-col gap-8 pt-2">
             <a
-              href="/test-harness/"
+              href="/test-harness.html"
               target="_blank"
               rel="noopener noreferrer"
               className="group flex items-center justify-between gap-4 rounded-md border border-primary/20 bg-primary/5 px-4 py-3 text-sm transition-colors hover:bg-primary/10"

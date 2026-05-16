@@ -11,7 +11,7 @@ the whole stack with one set of synthetic events.
 No build step. CDN-loaded SDKs. Open it in a browser.
 
 The same harness is also served by the deployed Next.js app at
-<https://crashscope-web-production.up.railway.app/test-harness/> — use that
+<https://crashscope-web-production.up.railway.app/test-harness.html> — use that
 if you'd rather skip the local-server step.
 
 ## What you need
@@ -35,7 +35,7 @@ both Sentry (`Sentry.setUser`) and PostHog (`posthog.identify`).
 ## Usage
 
 1. Open the harness in your browser. Two paths:
-   - **Hosted (no setup):** <https://crashscope-web-production.up.railway.app/test-harness/>
+   - **Hosted (no setup):** <https://crashscope-web-production.up.railway.app/test-harness.html>
    - **Self-hosted:**
      ```bash
      cd examples/test-app
