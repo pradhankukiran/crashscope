@@ -249,6 +249,84 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 // ---------------------------------------------------------------------------
 
 /**
+ * Compute the set of acceptable `Origin` values for `POST /api/triage`.
+ *
+ * Allowlist:
+ *   - `process.env.VERCEL_URL` (Vercel sets this without a scheme; we prepend
+ *     `https://`).
+ *   - `process.env.NEXT_PUBLIC_SITE_URL` if set (also normalized to an
+ *     `origin`).
+ *   - Same-origin: `Origin === https://<req.host>`, so the landing page on
+ *     this very deployment can call us.
+ *   - In `NODE_ENV !== "production"`, any `http://localhost:<port>` so the
+ *     dev server can talk to itself without configuration.
+ *
+ * Returns the allowlist plus a "matchesLocalhostInDev" flag so the caller can
+ * accept localhost without enumerating ports.
+ */
+interface OriginPolicy {
+  fixed: Set<string>;
+  selfOrigin: string;
+  allowLocalhostInDev: boolean;
+}
+
+function buildOriginPolicy(req: NextRequest): OriginPolicy {
+  const fixed = new Set<string>();
+  const vercel = process.env["VERCEL_URL"];
+  if (vercel) fixed.add(normalizeOrigin(`https://${vercel}`));
+  const site = process.env["NEXT_PUBLIC_SITE_URL"];
+  if (site) {
+    const norm = normalizeOrigin(site);
+    if (norm) fixed.add(norm);
+  }
+  const host = req.headers.get("host");
+  // Same-origin check: rebuild what the browser would have sent for `Origin`
+  // given the request host. We always prefer https since the routes are
+  // dynamic and Vercel/most edge layers force TLS.
+  const selfOrigin = host ? `https://${host}` : "";
+  return {
+    fixed,
+    selfOrigin,
+    allowLocalhostInDev: process.env["NODE_ENV"] !== "production",
+  };
+}
+
+function normalizeOrigin(raw: string): string {
+  try {
+    return new URL(raw).origin;
+  } catch {
+    return "";
+  }
+}
+
+function isOriginAllowed(origin: string | null, policy: OriginPolicy): boolean {
+  // No Origin header is fine for same-origin GET-like reads, but we *require*
+  // it for POST since browsers always send it for cross-site form/fetch
+  // submissions. A missing Origin here means either a non-browser client
+  // (curl, Postman) or a misconfigured front end — we reject either way to
+  // keep the surface area tight.
+  if (!origin) return false;
+  const candidate = normalizeOrigin(origin);
+  if (!candidate) return false;
+  if (policy.fixed.has(candidate)) return true;
+  if (policy.selfOrigin && candidate === policy.selfOrigin) return true;
+  if (policy.allowLocalhostInDev) {
+    try {
+      const u = new URL(candidate);
+      if (
+        u.protocol === "http:" &&
+        (u.hostname === "localhost" || u.hostname === "127.0.0.1")
+      ) {
+        return true;
+      }
+    } catch {
+      // fall through
+    }
+  }
+  return false;
+}
+
+/**
  * Extract a client IP from the request. Honors `x-forwarded-for` (first hop —
  * the original client, before our proxies/CDN) and falls back to a fixed
  * `unknown` bucket so callers without any IP signal still share a single
@@ -407,7 +485,23 @@ function parseTriageBody(
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const requestId = randomUUID();
 
-  // 0. Rate limit. Capped *before* parsing the body so an attacker can't burn
+  // 1. Origin allowlist. Browsers always send `Origin` on cross-site POSTs, so
+  //    this is an effective CSRF/abuse barrier even without a token — and it
+  //    short-circuits before we spend any work on rate-limit / body parsing.
+  const policy = buildOriginPolicy(req);
+  const origin = req.headers.get("origin");
+  if (!isOriginAllowed(origin, policy)) {
+    console.warn(
+      `[triage:post] origin_rejected requestId=${requestId} origin=${origin ?? "(none)"}`,
+    );
+    return errorResponse(403, {
+      error: "FORBIDDEN",
+      message: "Origin is not allowed.",
+      requestId,
+    });
+  }
+
+  // 2. Rate limit. Capped *before* parsing the body so an attacker can't burn
   //    CPU on JSON parsing 10k times. IP is from `x-forwarded-for` first hop
   //    (Vercel writes that), falling back to `x-real-ip` and finally a fixed
   //    bucket so callers without any IP signal still share a slot.
@@ -431,7 +525,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  // 1. Body size cap. The body should comfortably fit in a few KB (provider
+  // 3. Body size cap. The body should comfortably fit in a few KB (provider
   //    creds + opts), and we never need megabytes here. Reject *before*
   //    reading the body so a malicious client can't stream gigabytes at us.
   //    Header is checked first; if it's missing we let `.json()` enforce a
@@ -455,7 +549,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
   }
 
-  // 2. Body parse.
+  // 4. Body parse.
   let json: unknown;
   try {
     json = await req.json();
@@ -467,7 +561,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     });
   }
 
-  // 3. Schema + cross-field validation.
+  // 5. Schema + cross-field validation.
   const parsed = parseTriageBody(json);
   if (!parsed.ok) {
     return errorResponse(400, {
@@ -477,7 +571,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     });
   }
 
-  // 4. Anthropic key is mandatory for this endpoint. The schema already
+  // 6. Anthropic key is mandatory for this endpoint. The schema already
   //    enforces non-empty, but we double-check here so the error message is
   //    explicit instead of a generic schema complaint.
   if (!parsed.body.anthropic.apiKey.trim()) {
@@ -489,7 +583,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     });
   }
 
-  // 5. Pipeline.
+  // 7. Pipeline.
   console.info(
     `[triage:post] start requestId=${requestId} errorProvider=${parsed.body.errorProvider} sessionProvider=${parsed.body.sessionProvider} since=${parsed.body.opts.since} limit=${parsed.body.opts.limit}`,
   );
