@@ -58,120 +58,178 @@ export async function runTriage(options: TriageOptions): Promise<void> {
   const startedAt = Date.now();
   const debugLog = options.debug ? await openDebugLog() : null;
 
-  // ---- 1. Load + validate config -----------------------------------------
-  const config = await loadConfig(options.configPath);
+  // SIGINT → AbortController. Two callers honour the signal:
+  //   1. `investigate()` (core forwards the signal to the Anthropic SDK).
+  //   2. `fetchSessionsForErrors` polls `signal.aborted` between worker
+  //      iterations so an in-flight wave finishes (or fails) but new fetches
+  //      stop being scheduled.
+  // We install/uninstall the listener around the long-running work — keeping
+  // it scoped means a second Ctrl+C after the listener is detached lets the
+  // default handler tear the process down (no `--force` needed).
+  const controller = new AbortController();
+  const onSigint = (): void => {
+    if (controller.signal.aborted) return;
+    controller.abort(new Error("Cancelled by user"));
+    process.stderr.write(chalk.yellow("\nCancelling…\n"));
+  };
+  process.once("SIGINT", onSigint);
 
-  // ---- 2. Resolve auth ---------------------------------------------------
-  const auth = await detectAnthropicAuth(config.anthropic);
-  if (!auth.ok) {
-    // Throw an AuthError so the central handler emits exit code 3 with the
-    // hint payload the detect wrapper already produced.
-    throw new AuthError("anthropic", formatAuthFailure(auth.message, auth.hints));
-  }
-
-  // ---- 3. Instantiate adapters from config ------------------------------
-  const errorAdapter = createErrorAdapter(config);
-  const sessionAdapter = createSessionAdapter(config);
-
-  // ---- 4. Resolve outputs ------------------------------------------------
-  // CLI flag overrides config; `--json` is a convenience alias. We dedupe so
-  // a user passing `--output terminal,terminal` doesn't print twice.
-  const outputs: OutputChannel[] = dedupe(
-    options.json
-      ? ["json"]
-      : (options.outputs ?? config.outputs),
-  );
-
-  // ---- 5. Parse --since --------------------------------------------------
-  const { date: sinceDate, windowLabel } = parseSince(options.since);
-
-  // ---- 6. Fetch errors ---------------------------------------------------
-  const useSpinners = process.stdout.isTTY === true && !outputs.includes("json");
-  const fetchSpin = makeSpinner(useSpinners, "Fetching errors from " + config.errorProvider + "...", "📡");
-  let errors: NormalizedError[];
   try {
-    const fetchOpts: Parameters<typeof errorAdapter.fetchRecent>[0] = {
-      since: sinceDate,
-      limit: options.limit,
-    };
-    if (options.severities && options.severities.length > 0) {
-      fetchOpts.severities = options.severities;
-    }
-    errors = await errorAdapter.fetchRecent(fetchOpts);
-    fetchSpin.succeed(`Fetched ${errors.length} errors from ${config.errorProvider}`);
-  } catch (err: unknown) {
-    fetchSpin.fail(`Failed to fetch errors from ${config.errorProvider}`);
-    await writeDebug(debugLog, "fetchRecent", err);
-    throw normalizeError(err, config.errorProvider);
-  }
+    // ---- 1. Load + validate config -----------------------------------------
+    const config = await loadConfig(options.configPath);
 
-  // Early exit for empty result sets — produce an empty report so JSON / CI
-  // consumers always get a parseable payload.
-  if (errors.length === 0) {
-    const emptyReport = buildReport({
-      issues: [],
+    // ---- 2. Resolve auth ---------------------------------------------------
+    const auth = await detectAnthropicAuth(config.anthropic);
+    if (!auth.ok) {
+      // Throw an AuthError so the central handler emits exit code 3 with the
+      // hint payload the detect wrapper already produced.
+      throw new AuthError("anthropic", formatAuthFailure(auth.message, auth.hints));
+    }
+
+    // ---- 3. Instantiate adapters from config ------------------------------
+    const errorAdapter = createErrorAdapter(config);
+    const sessionAdapter = createSessionAdapter(config);
+
+    // ---- 4. Resolve outputs ------------------------------------------------
+    // CLI flag overrides config; `--json` is a convenience alias. We dedupe so
+    // a user passing `--output terminal,terminal` doesn't print twice.
+    const outputs: OutputChannel[] = dedupe(
+      options.json
+        ? ["json"]
+        : (options.outputs ?? config.outputs),
+    );
+
+    // ---- 5. Parse --since --------------------------------------------------
+    const { date: sinceDate, windowLabel } = parseSince(options.since);
+
+    // ---- 6. Fetch errors ---------------------------------------------------
+    const useSpinners = process.stdout.isTTY === true && !outputs.includes("json");
+    const fetchSpin = makeSpinner(useSpinners, "Fetching errors from " + config.errorProvider + "...", "📡");
+    let errors: NormalizedError[];
+    try {
+      const fetchOpts: Parameters<typeof errorAdapter.fetchRecent>[0] = {
+        since: sinceDate,
+        limit: options.limit,
+      };
+      if (options.severities && options.severities.length > 0) {
+        fetchOpts.severities = options.severities;
+      }
+      errors = await errorAdapter.fetchRecent(fetchOpts);
+      throwIfAborted(controller.signal);
+      fetchSpin.succeed(`Fetched ${errors.length} errors from ${config.errorProvider}`);
+    } catch (err: unknown) {
+      fetchSpin.fail(`Failed to fetch errors from ${config.errorProvider}`);
+      await writeDebug(debugLog, "fetchRecent", err);
+      throw normalizeError(err, config.errorProvider);
+    }
+
+    // Early exit for empty result sets — produce an empty report so JSON / CI
+    // consumers always get a parseable payload.
+    if (errors.length === 0) {
+      const emptyReport = buildReport({
+        issues: [],
+        config,
+        windowLabel,
+        durationMs: Date.now() - startedAt,
+      });
+      await emitOutputs(emptyReport, outputs, config);
+      return;
+    }
+
+    // ---- 7. Fetch sessions in parallel (bounded concurrency) --------------
+    const sessionsSpin = makeSpinner(useSpinners, "Matching sessions...", "🎬");
+    const sessions = await fetchSessionsForErrors(
+      errors,
+      sessionAdapter,
+      SESSION_CONCURRENCY,
+      debugLog,
+      controller.signal,
+    );
+    throwIfAborted(controller.signal);
+    const matched = Array.from(sessions.values()).filter((s) => s !== null).length;
+    sessionsSpin.succeed(`Matched ${matched}/${errors.length} sessions`);
+
+    // ---- 8. Investigate with Claude ---------------------------------------
+    const investigateSpin = makeSpinner(
+      useSpinners,
+      `Investigating with Claude (0/${errors.length})...`,
+      "🤖",
+    );
+    // The current `investigate()` is not progress-streaming. We approximate
+    // progress by re-rendering the spinner text every 2s with a tick counter so
+    // long runs don't look frozen. The loop also checks for abort so a Ctrl+C
+    // updates the spinner text immediately while the underlying SDK call wraps
+    // up.
+    let elapsedTicks = 0;
+    const tickInterval = useSpinners
+      ? setInterval(() => {
+          elapsedTicks += 1;
+          if (controller.signal.aborted) {
+            investigateSpin.text =
+              `Cancelling investigation (${elapsedTicks * 2}s)...`;
+            return;
+          }
+          investigateSpin.text =
+            `Investigating with Claude (${elapsedTicks * 2}s elapsed, ${errors.length} issues)...`;
+        }, 2_000)
+      : null;
+    let issues: TriageIssue[];
+    try {
+      issues = await investigate({
+        errors,
+        sessions,
+        auth: auth.resolution,
+        signal: controller.signal,
+      });
+      investigateSpin.succeed(`Investigated ${issues.length} issues`);
+    } catch (err: unknown) {
+      investigateSpin.fail("Investigation failed");
+      await writeDebug(debugLog, "investigate", err);
+      // If the signal aborted we exit with the conventional 130 code rather
+      // than reporting the cancellation as a generic adapter failure.
+      if (controller.signal.aborted) {
+        process.exit(130);
+      }
+      throw normalizeError(err, "anthropic");
+    } finally {
+      if (tickInterval) clearInterval(tickInterval);
+    }
+
+    // ---- 9. Assemble report -----------------------------------------------
+    const report = buildReport({
+      issues,
       config,
       windowLabel,
       durationMs: Date.now() - startedAt,
     });
-    await emitOutputs(emptyReport, outputs, config);
-    return;
-  }
 
-  // ---- 7. Fetch sessions in parallel (bounded concurrency) --------------
-  const sessionsSpin = makeSpinner(useSpinners, "Matching sessions...", "🎬");
-  const sessions = await fetchSessionsForErrors(
-    errors,
-    sessionAdapter,
-    SESSION_CONCURRENCY,
-    debugLog,
-  );
-  const matched = Array.from(sessions.values()).filter((s) => s !== null).length;
-  sessionsSpin.succeed(`Matched ${matched}/${errors.length} sessions`);
-
-  // ---- 8. Investigate with Claude ---------------------------------------
-  const investigateSpin = makeSpinner(
-    useSpinners,
-    `Investigating with Claude (0/${errors.length})...`,
-    "🤖",
-  );
-  // The current `investigate()` is not progress-streaming. We approximate
-  // progress by re-rendering the spinner text every 2s with a tick counter so
-  // long runs don't look frozen.
-  let elapsedTicks = 0;
-  const tickInterval = useSpinners
-    ? setInterval(() => {
-        elapsedTicks += 1;
-        investigateSpin.text =
-          `Investigating with Claude (${elapsedTicks * 2}s elapsed, ${errors.length} issues)...`;
-      }, 2_000)
-    : null;
-  let issues: TriageIssue[];
-  try {
-    issues = await investigate({
-      errors,
-      sessions,
-      auth: auth.resolution,
-    });
-    investigateSpin.succeed(`Investigated ${issues.length} issues`);
-  } catch (err: unknown) {
-    investigateSpin.fail("Investigation failed");
-    await writeDebug(debugLog, "investigate", err);
-    throw normalizeError(err, "anthropic");
+    // ---- 10. Emit to selected outputs -------------------------------------
+    await emitOutputs(report, outputs, config);
   } finally {
-    if (tickInterval) clearInterval(tickInterval);
+    process.off("SIGINT", onSigint);
   }
+}
 
-  // ---- 9. Assemble report -----------------------------------------------
-  const report = buildReport({
-    issues,
-    config,
-    windowLabel,
-    durationMs: Date.now() - startedAt,
-  });
-
-  // ---- 10. Emit to selected outputs -------------------------------------
-  await emitOutputs(report, outputs, config);
+/**
+ * Throw an `Error` (with name "AbortError") when the signal is already
+ * aborted. Callers use this between long-running stages so a Ctrl+C between
+ * `fetchRecent` and `fetchSessionsForErrors` doesn't waste API calls.
+ *
+ * We intentionally throw a plain `Error` named "AbortError" rather than the
+ * DOM `DOMException` (the latter exists in Node 20+ but pulling it into typed
+ * code adds a `lib: ["DOM"]` requirement we'd rather avoid).
+ */
+function throwIfAborted(signal: AbortSignal): void {
+  if (!signal.aborted) return;
+  const reason: unknown = signal.reason;
+  if (reason instanceof Error) {
+    const wrapped = new Error(reason.message);
+    wrapped.name = "AbortError";
+    throw wrapped;
+  }
+  const err = new Error("Aborted");
+  err.name = "AbortError";
+  throw err;
 }
 
 /**
@@ -240,6 +298,7 @@ async function fetchSessionsForErrors(
   sessionAdapter: ReturnType<typeof createSessionAdapter>,
   concurrency: number,
   debugLog: DebugLog | null,
+  signal: AbortSignal,
 ): Promise<Map<string, NormalizedSession | null>> {
   const out = new Map<string, NormalizedSession | null>();
   let cursor = 0;
@@ -247,6 +306,11 @@ async function fetchSessionsForErrors(
 
   const next = async (): Promise<void> => {
     while (cursor < errors.length) {
+      // Polling the signal between iterations is cheap and lets a Ctrl+C
+      // short-circuit the remaining queue without waiting for an in-flight
+      // adapter call to fail. The SessionAdapter contract doesn't (yet)
+      // accept an AbortSignal so we can't pre-empt the active fetch itself.
+      if (signal.aborted) return;
       const idx = cursor++;
       const error = errors[idx];
       if (!error) continue;
@@ -271,6 +335,11 @@ async function fetchSessionsForErrors(
   const lanes = Math.max(1, Math.min(concurrency, errors.length));
   for (let i = 0; i < lanes; i++) workers.push(next());
   await Promise.all(workers);
+  // Ensure every error has an entry even when we cancelled early — investigate
+  // sets the per-error `session` to null when missing.
+  for (const error of errors) {
+    if (!out.has(error.id)) out.set(error.id, null);
+  }
   return out;
 }
 
