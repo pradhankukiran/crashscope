@@ -22,6 +22,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { waitUntil } from "@vercel/functions";
 import { CrashscopeError } from "@crashscope/core";
 import { loadEnv } from "@/lib/env";
+import { redactError } from "@/lib/redact";
 import {
   buildErrorBlocks,
   buildTriageReportBlocks,
@@ -113,7 +114,7 @@ async function postToResponseUrl(
   } catch (err: unknown) {
     console.error(
       `[slack] response_url POST threw requestId=${requestId}`,
-      err,
+      redactError(err),
     );
   }
 }
@@ -144,7 +145,7 @@ async function runAndPostback(
         : "Triage failed unexpectedly. Check server logs.";
     console.error(
       `[slack] runAndPostback failed requestId=${requestId}`,
-      err,
+      redactError(err),
     );
     await postToResponseUrl(
       payload.response_url,

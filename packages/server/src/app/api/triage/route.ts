@@ -40,6 +40,7 @@ import {
 import type { Severity } from "@crashscope/core";
 import { checkApiToken } from "@/lib/auth";
 import { checkPostTriageLimit } from "@/lib/rate-limit";
+import { redactError } from "@/lib/redact";
 import {
   isSinceKeyword,
   runTriage,
@@ -238,7 +239,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const { status, error, message } = classifyError(err);
     console.error(
       `[triage] failed requestId=${requestId} status=${status} error=${error}`,
-      err,
+      redactError(err),
     );
     return errorResponse(status, { error, message, requestId });
   }
@@ -611,7 +612,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const { status, error, message } = classifyError(err);
     console.error(
       `[triage:post] failed requestId=${requestId} status=${status} error=${error}`,
-      err,
+      redactError(err),
     );
     return errorResponse(status, { error, message, requestId });
   }

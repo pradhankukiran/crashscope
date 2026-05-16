@@ -27,6 +27,9 @@ export async function register(): Promise<void> {
     // We deliberately don't rethrow: a partially-configured deploy should
     // still come up and let request-time handlers produce intelligible 500s,
     // rather than crash-looping with no surface visible to the operator.
-    console.error("[crashscope] env validation failed at boot:", err);
+    // Redact in case the validation error embedded a partial token in its
+    // message (Zod doesn't, today, but defence in depth costs nothing here).
+    const { redactError } = await import("./lib/redact.js");
+    console.error("[crashscope] env validation failed at boot:", redactError(err));
   }
 }

@@ -22,6 +22,7 @@
  */
 import { Ratelimit } from "@upstash/ratelimit";
 import { Redis } from "@upstash/redis";
+import { redactError } from "./redact.js";
 
 /** Per-hour quota (sliding window). */
 export const HOURLY_LIMIT = 3;
@@ -178,7 +179,7 @@ export async function checkPostTriageLimit(ip: string): Promise<RateLimitVerdict
     try {
       return await checkUpstash(upstash, ip);
     } catch (err: unknown) {
-      console.error("[rate-limit] upstash check failed, falling open", err);
+      console.error("[rate-limit] upstash check failed, falling open", redactError(err));
       // Fall through to memory limiter so we still apply *some* cap rather
       // than letting the request through unbounded.
       return checkInMemory(ip);
