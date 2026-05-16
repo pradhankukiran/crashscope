@@ -99,24 +99,35 @@ const TRANSIENT_STATUS_REGEX = /\b(?:429|500|502|503|504)\b/;
 /**
  * Tiny semaphore — limits concurrent investigations without pulling in
  * `p-limit` or `async-sema`. Capacity-bounded async lock.
+ *
+ * The returned `release` callback is idempotent: callers wrap it in
+ * `try/finally`, and reentrancy from a confused error path (e.g. release()
+ * called from both a normal-exit and a catch branch) would otherwise drop
+ * `active` below zero and unbalance the queue. The `released` flag makes
+ * subsequent calls a no-op.
  */
 function createSemaphore(max: number): {
   acquire: () => Promise<() => void>;
 } {
   let active = 0;
   const queue: Array<() => void> = [];
-  const release = (): void => {
-    active--;
-    const next = queue.shift();
-    if (next) {
-      active++;
-      next();
-    }
-  };
   return {
     acquire: () =>
       new Promise<() => void>((resolve) => {
-        const grant = (): void => resolve(release);
+        const grant = (): void => {
+          let released = false;
+          const release = (): void => {
+            if (released) return;
+            released = true;
+            active--;
+            const next = queue.shift();
+            if (next) {
+              active++;
+              next();
+            }
+          };
+          resolve(release);
+        };
         if (active < max) {
           active++;
           grant();
