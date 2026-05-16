@@ -1,3 +1,6 @@
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
+
 /**
  * Content-Security-Policy applied to all responses.
  *
@@ -41,16 +44,35 @@ const securityHeaders = [
   { key: "Content-Security-Policy", value: csp },
 ];
 
+// Resolve the monorepo root (two levels up from `packages/server/`). Passing
+// this to `outputFileTracingRoot` tells Next's standalone tracer to anchor
+// its file-tracing at the workspace root, which keeps the generated paths
+// inside `.next/standalone/` predictable for Docker (`packages/server/server.js`
+// rather than something derived from a guessed root).
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const monorepoRoot = resolve(__dirname, "../..");
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
   transpilePackages: ["@crashscope/core"],
+  // Emit a self-contained Node server at `.next/standalone/` for Docker.
+  // The runtime entrypoint is `packages/server/server.js` relative to the
+  // standalone output (Next preserves the monorepo layout inside it).
+  // See: https://nextjs.org/docs/pages/api-reference/next-config-js/output
+  output: "standalone",
   experimental: {
     typedRoutes: true,
     // Enable the `src/instrumentation.ts` hook so we can validate env at
     // boot. Default is `false` in Next 14; auto-on from Next 15.
     instrumentationHook: true,
     serverComponentsExternalPackages: ["@anthropic-ai/claude-agent-sdk"],
+    // Anchor file tracing at the workspace root so hoisted pnpm deps under
+    // `<root>/node_modules/.pnpm/...` get copied into the standalone bundle.
+    // Without this, Next warns and guesses a root which may miss workspace
+    // packages. In Next 14 this lives under `experimental`; promoted to the
+    // top level in Next 15.
+    outputFileTracingRoot: monorepoRoot,
   },
   async headers() {
     return [
