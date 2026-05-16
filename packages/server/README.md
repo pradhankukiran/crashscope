@@ -2,7 +2,7 @@
 
 Next.js app for crashscope: marketing landing page, REST triage API, and Slack bot in a single deployable surface.
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fcrashscope%2Fcrashscope%2Ftree%2Fmain%2Fpackages%2Fserver)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fpradhankukiran%2Fcrashscope%2Ftree%2Fmaster%2Fpackages%2Fserver)
 
 ## What you get
 
