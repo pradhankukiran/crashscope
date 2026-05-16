@@ -8,6 +8,7 @@
  */
 import { AdapterMatrix } from "./components/AdapterMatrix";
 import { DemoSection } from "./components/DemoSection";
+import { Demos } from "./components/Demos";
 import { Deploy } from "./components/Deploy";
 import { Hero } from "./components/Hero";
 import { HowItWorks } from "./components/HowItWorks";
@@ -19,6 +20,7 @@ export default function HomePage(): JSX.Element {
       <Hero />
       <DemoSection />
       <HowItWorks />
+      <Demos />
       <AdapterMatrix />
       <QuickStart />
       <Deploy />
