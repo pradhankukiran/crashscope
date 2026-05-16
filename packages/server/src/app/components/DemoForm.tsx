@@ -114,7 +114,15 @@ const formSchema = z
       appSlug: z.string(),
     }),
     since: z.enum(SINCE_VALUES),
-    limit: z.coerce.number().int().min(1).max(25),
+    // `z.number()` (not `z.coerce.number()`) because zod 4 widens the *input*
+    // type of `.coerce.number()` to `unknown`, which then leaks through
+    // `@hookform/resolvers/zod` and forces every Control<TFieldValues> to use
+    // `unknown` for `limit`. The Input control already converts to Number()
+    // before calling `field.onChange`, and `mergeStored` coerces from storage,
+    // so the runtime value entering this schema is always a number — the
+    // coercion was purely defensive and removing it is behavior-equivalent
+    // for every path that feeds this form.
+    limit: z.number().int().min(1).max(25),
   })
   .superRefine((data, ctx) => {
     switch (data.errorProvider) {
