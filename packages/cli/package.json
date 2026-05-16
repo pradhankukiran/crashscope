@@ -1,6 +1,6 @@
 {
   "name": "@pradhankukiran/crashscope",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "AI-powered error triage CLI: pulls errors from Sentry / Rollbar / Bugsnag / Honeybadger, joins them with PostHog or LogRocket session replays, and uses Claude to produce ranked, actionable triage reports.",
   "keywords": [
     "ai",
