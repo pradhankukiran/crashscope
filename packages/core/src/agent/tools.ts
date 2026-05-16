@@ -6,6 +6,12 @@ export const HYPOTHESIS_MAX = 280;
 export const ROOT_CAUSE_MAX = 200;
 export const USER_JOURNEY_MAX = 300;
 export const SUGGESTED_FILES_MAX = 5;
+/**
+ * Per-item cap on the {@link suggestedFiles} array. A file path that exceeds
+ * this is almost certainly hallucinated or pathological; truncating prevents
+ * one runaway entry from polluting the rendered report.
+ */
+export const SUGGESTED_FILE_PATH_MAX = 256;
 
 /**
  * Anthropic-format tool definition for emitting a structured triage finding.
@@ -42,7 +48,7 @@ export const emitTriageFindingTool = {
       suggestedFiles: {
         type: "array",
         maxItems: SUGGESTED_FILES_MAX,
-        items: { type: "string" },
+        items: { type: "string", maxLength: SUGGESTED_FILE_PATH_MAX },
         description:
           "Up to 5 file paths (relative or absolute) most worth opening first. " +
           "Infer from the stack trace and error type; omit when truly unknown.",
@@ -92,7 +98,9 @@ export const triageFindingSchema = z
   .object({
     hypothesis: z.string().min(1).max(HYPOTHESIS_MAX),
     rootCauseGuess: z.string().min(1).max(ROOT_CAUSE_MAX),
-    suggestedFiles: z.array(z.string().min(1)).max(SUGGESTED_FILES_MAX),
+    suggestedFiles: z
+      .array(z.string().min(1).max(SUGGESTED_FILE_PATH_MAX))
+      .max(SUGGESTED_FILES_MAX),
     userJourney: z.string().min(1).max(USER_JOURNEY_MAX),
     confidence: confidenceSchema,
   })

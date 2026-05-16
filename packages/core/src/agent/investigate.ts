@@ -7,6 +7,11 @@ import { ValidationError } from "../errors.js";
 import { buildInvestigationPrompt } from "./prompt.js";
 import {
   triageFindingSchema,
+  HYPOTHESIS_MAX,
+  ROOT_CAUSE_MAX,
+  USER_JOURNEY_MAX,
+  SUGGESTED_FILES_MAX,
+  SUGGESTED_FILE_PATH_MAX,
   type TriageFinding,
 } from "./tools.js";
 import type { AuthResolution } from "./auth.js";
@@ -269,13 +274,16 @@ function combineSignals(
  * Z-shaped raw shape mirror of {@link triageFindingSchema} for the SDK tool().
  *
  * The SDK accepts either zod v3 or v4 raw shapes; we keep this in v3 since
- * the rest of `@crashscope/core` is on zod v3.
+ * the rest of `@crashscope/core` is on zod v3. Bounds mirror the canonical
+ * constants in `./tools.js` so a divergence between the two would be loud.
  */
 const triageFindingRawShape = {
-  hypothesis: z.string().min(1).max(280),
-  rootCauseGuess: z.string().min(1).max(200),
-  suggestedFiles: z.array(z.string().min(1)).max(5),
-  userJourney: z.string().min(1).max(300),
+  hypothesis: z.string().min(1).max(HYPOTHESIS_MAX),
+  rootCauseGuess: z.string().min(1).max(ROOT_CAUSE_MAX),
+  suggestedFiles: z
+    .array(z.string().min(1).max(SUGGESTED_FILE_PATH_MAX))
+    .max(SUGGESTED_FILES_MAX),
+  userJourney: z.string().min(1).max(USER_JOURNEY_MAX),
   confidence: z.enum(["high", "med", "low"]),
 };
 

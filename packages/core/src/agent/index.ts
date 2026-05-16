@@ -23,5 +23,6 @@ export {
   ROOT_CAUSE_MAX,
   USER_JOURNEY_MAX,
   SUGGESTED_FILES_MAX,
+  SUGGESTED_FILE_PATH_MAX,
 } from "./tools.js";
 export type { TriageFinding } from "./tools.js";
