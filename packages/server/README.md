@@ -15,6 +15,60 @@ Next.js app for crashscope: marketing landing page, REST triage API, and Slack b
 
 The triage pipeline runs inside `lib/triage.ts` and is shared by both the REST endpoint and the Slack bot, so behavior is identical across surfaces. The public POST mode supplies its own `CrashscopeConfig` via the new `configOverride` parameter on `runTriage`.
 
+## Deploy to Railway (recommended)
+
+Railway is the recommended deploy target for crashscope. The server runs as a long-lived Node process inside Docker, which fits the workload better than a serverless surface:
+
+- **Long Claude calls finish.** A triage may take 30–120s. On Vercel that hits the function-duration ceiling and you pay for `waitUntil` plumbing to keep the background work alive. On Railway the request stays inside the same Node process for its whole life — no timeouts to negotiate, no callback dance.
+- **Slack bot lifecycle is simpler.** The `/triage` slash command fires off a background job and posts back to Slack's `response_url`. With a real long-running process that's just an awaited promise; on serverless it requires `@vercel/functions`' `waitUntil` to survive the response (still works, just more moving parts).
+- **One image, many hosts.** The Dockerfile at `packages/server/Dockerfile` is portable — Railway today, any container host tomorrow (Fly.io, Render, Cloud Run, a VPS).
+
+### One-command deploy
+
+```sh
+# from the monorepo root
+railway init        # link/create a Railway project
+railway up          # build the Dockerfile and ship the image
+railway domain      # mint a public URL for the service
+```
+
+`railway.json` at the repo root tells Railway to use `packages/server/Dockerfile` and to health-check `/api/health` after each deploy. The Dockerfile reads `PORT` from Railway's injected env var; Next's standalone server respects it directly.
+
+### Set environment variables
+
+Either through the dashboard (Settings → Variables) or from the CLI:
+
+```sh
+railway variables set ANTHROPIC_API_KEY=sk-ant-...
+railway variables set CRASHSCOPE_API_TOKEN=$(openssl rand -hex 32)
+railway variables set ERROR_PROVIDER=sentry
+railway variables set SENTRY_TOKEN=...
+railway variables set SENTRY_ORG=...
+railway variables set SENTRY_PROJECT=...
+railway variables set SESSION_PROVIDER=posthog
+railway variables set POSTHOG_API_KEY=...
+railway variables set POSTHOG_PROJECT_ID=...
+railway variables set SLACK_SIGNING_SECRET=...
+railway variables set SLACK_BOT_TOKEN=xoxb-...
+```
+
+See the [Environment variables](#environment-variables) table below for the full list. Required-vs-conditional gates are enforced by `lib/config.ts`; if you forget one, the boot-time `instrumentation.ts` hook will surface a single `ConfigError` listing every absent var.
+
+### Deploy to Vercel (still supported)
+
+The same code still builds on Vercel — push the repo, point a project at `packages/server`, and paste env vars into the project settings. The `[Deploy with Vercel]` badge above is the one-click path. Long-running Claude calls work via `waitUntil` from `@vercel/functions`, which is a safe no-op on Railway and a function-keep-alive on Vercel; the codebase has a single source path for both.
+
+### Any other container host
+
+The Dockerfile is platform-agnostic. To build and run locally:
+
+```sh
+docker build -f packages/server/Dockerfile -t crashscope-server .
+docker run --rm -p 3000:3000 --env-file packages/server/.env.local crashscope-server
+```
+
+The build context must be the monorepo root (because pnpm workspaces).
+
 ## Local development
 
 ```bash

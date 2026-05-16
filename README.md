@@ -136,7 +136,13 @@ cp packages/server/.env.example packages/server/.env.local
 pnpm --filter @crashscope/server dev
 ```
 
-Dev server runs at `http://localhost:3000`. The landing page includes a **public demo form** — visitors paste their own credentials, run a live triage, and see the report rendered on the page (nothing stored server-side). To deploy on Vercel, click the button in [packages/server/README.md](packages/server/README.md) or push a connected repo and paste env vars into your project settings.
+Dev server runs at `http://localhost:3000`. The landing page includes a **public demo form** — visitors paste their own credentials, run a live triage, and see the report rendered on the page (nothing stored server-side).
+
+When you're ready to put the server in front of your team:
+
+- **Railway (recommended)** — a long-running Node process via Docker. Best fit for crashscope because triage runs can take 30–120s and the Slack bot does fire-and-forget background work, neither of which want a function-duration ceiling. From the repo root: `railway init && railway up && railway domain`. `railway.json` and `packages/server/Dockerfile` are already wired up. Full walkthrough: [packages/server/README.md](packages/server/README.md#deploy-to-railway-recommended).
+- **Vercel** — still supported; click the `Deploy with Vercel` button in [packages/server/README.md](packages/server/README.md), or push a connected repo and paste env vars into the project settings. The same `waitUntil`-based slash-command path runs on both platforms.
+- **Anywhere else** — the Dockerfile is platform-agnostic. Run it on Fly.io, Render, Cloud Run, a VPS — anywhere that can run a container.
 
 ## Authentication
 
