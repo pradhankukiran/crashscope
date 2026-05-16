@@ -206,15 +206,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     `[slack] /triage start requestId=${requestId} user=${parsed.user_id} channel=${parsed.channel_id}`,
   );
 
-  // Fire-and-forget background work, but tell Vercel to keep the function
-  // alive until the promise settles. `waitUntil` is the canonical Next 14 /
+  // Fire-and-forget background work. `waitUntil` is the canonical Next 14 /
   // Vercel pattern: on serverless, the runtime would otherwise tear the
-  // function down as soon as we `return` below, killing the triage mid-flight.
+  // function down as soon as we `return` below, killing the triage
+  // mid-flight; calling it tells Vercel to keep the function alive until the
+  // promise settles.
   //
-  // Outside Vercel (e.g. `next dev`, self-hosted node), `waitUntil` is a no-op
-  // and the surrounding Node event loop keeps the promise running on its own
-  // because we still hold a reference via the closure. Either way, the
-  // postback eventually fires.
+  // Outside Vercel — Railway, any Docker host, `next dev`, etc. — `waitUntil`
+  // from `@vercel/functions` is a safe no-op, and the long-running Node
+  // process keeps the promise running on its own because we hold a reference
+  // via the closure. The same code path therefore works on both platforms;
+  // the postback eventually fires either way.
   waitUntil(runAndPostback(parsed, requestId));
 
   return NextResponse.json(
