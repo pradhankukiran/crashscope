@@ -122,12 +122,17 @@ export async function runInit(options: {
   //    and never lands in shell scrollback in plain text. Inquirer's
   //    `password` doesn't expose a "default empty" hint the same way `input`
   //    does, so we accept a literal empty submission as "skip".
-  const anthropicKey = await password({
-    message:
-      "Anthropic API key (optional — leave blank to use Claude Code subscription):",
-    mask: "*",
-  });
-  const anthropicTrimmed = anthropicKey.trim();
+  let anthropicTrimmed = "";
+  for (;;) {
+    const anthropicKey = await password({
+      message:
+        "Anthropic API key (optional — leave blank to use Claude Code subscription):",
+      mask: "*",
+    });
+    anthropicTrimmed = anthropicKey.trim();
+    if (anthropicTrimmed.length === 0) break;
+    if (!(await warnIfUnexpectedFormat("Anthropic", anthropicTrimmed))) break;
+  }
 
   // 6. Assemble + validate.
   const draftConfig: CrashscopeConfig = {
@@ -360,6 +365,71 @@ function required(label: string): (value: string) => string | true {
     value.trim().length > 0 ? true : `${label} is required.`;
 }
 
+/**
+ * Provider-specific regex hints used by {@link warnIfUnexpectedFormat}.
+ *
+ * The patterns intentionally accept any older / future variant the provider
+ * has used so we don't hard-reject a perfectly valid token. The warning is a
+ * nudge ("this doesn't look like a current token, did you paste the right
+ * one?") rather than a gate — providers rotate token formats and we'd
+ * rather over-accept than over-reject.
+ */
+const TOKEN_FORMAT_HINTS: Record<
+  string,
+  { pattern: RegExp; example: string }
+> = {
+  Sentry: {
+    pattern: /^(sntrys?_[A-Za-z0-9_-]{20,}|[0-9a-f]{32,})$/,
+    example: "sntrys_… or a 64-char hex string",
+  },
+  "PostHog API key": {
+    pattern: /^phx_[A-Za-z0-9_-]{20,}$/,
+    example: "phx_…",
+  },
+  Bugsnag: {
+    pattern: /^[0-9a-f]{32,}$/i,
+    example: "a 32-char hex token",
+  },
+  Honeybadger: {
+    pattern: /^[A-Za-z0-9]{16,}$/,
+    example: "a 16+ char alphanumeric token",
+  },
+  Anthropic: {
+    pattern: /^sk-ant-[A-Za-z0-9_-]{20,}$/,
+    example: "sk-ant-…",
+  },
+};
+
+/**
+ * Inspect a freshly-collected token and surface a hint if it doesn't match
+ * the well-known shape for that provider.
+ *
+ * Returns `true` when the user wants to re-enter the field, `false`
+ * otherwise. Callers that want the loop semantics should put the call inside
+ * a `while`/`for` and re-collect when this returns `true`.
+ *
+ * Hard rejection is deliberately avoided — providers rotate token shapes and
+ * a strict-mode regex would lock users with older but still-valid tokens out
+ * of the wizard entirely.
+ */
+async function warnIfUnexpectedFormat(
+  label: string,
+  token: string,
+): Promise<boolean> {
+  const hint = TOKEN_FORMAT_HINTS[label];
+  if (!hint) return false;
+  if (hint.pattern.test(token)) return false;
+  process.stdout.write(
+    chalk.yellow(
+      `  ⚠ ${label} token doesn't match the expected format (${hint.example}).\n`,
+    ),
+  );
+  return confirm({
+    message: `Re-enter ${label} token?`,
+    default: true,
+  });
+}
+
 // ---- Per-provider credential collection ------------------------------------
 //
 // Each `collect*` function does one pass through the wizard's questions and
@@ -368,11 +438,19 @@ function required(label: string): (value: string) => string | true {
 // without restructuring the question flow.
 
 async function collectSentry(): Promise<SentryCredentials> {
-  const token = await password({
-    message: "Sentry auth token:",
-    mask: "*",
-    validate: required("Token"),
-  });
+  let token: string;
+  // Loop so a format-mismatch warning can re-collect just the token without
+  // forcing the user to re-type the org / project slugs below.
+  for (;;) {
+    token = (
+      await password({
+        message: "Sentry auth token:",
+        mask: "*",
+        validate: required("Token"),
+      })
+    ).trim();
+    if (!(await warnIfUnexpectedFormat("Sentry", token))) break;
+  }
   const org = await input({
     message: "Sentry organization slug:",
     validate: required("Organization"),
@@ -381,7 +459,7 @@ async function collectSentry(): Promise<SentryCredentials> {
     message: "Sentry project slug:",
     validate: required("Project"),
   });
-  return { token: token.trim(), org: org.trim(), project: project.trim() };
+  return { token, org: org.trim(), project: project.trim() };
 }
 
 async function collectRollbar(): Promise<RollbarCredentials> {
@@ -400,11 +478,17 @@ async function collectRollbar(): Promise<RollbarCredentials> {
 }
 
 async function collectBugsnag(): Promise<BugsnagCredentials> {
-  const token = await password({
-    message: "Bugsnag personal auth token:",
-    mask: "*",
-    validate: required("Token"),
-  });
+  let token: string;
+  for (;;) {
+    token = (
+      await password({
+        message: "Bugsnag personal auth token:",
+        mask: "*",
+        validate: required("Token"),
+      })
+    ).trim();
+    if (!(await warnIfUnexpectedFormat("Bugsnag", token))) break;
+  }
   const organizationId = await input({
     message: "Bugsnag organization id:",
     validate: required("Organization id"),
@@ -414,31 +498,43 @@ async function collectBugsnag(): Promise<BugsnagCredentials> {
     validate: required("Project id"),
   });
   return {
-    token: token.trim(),
+    token,
     organizationId: organizationId.trim(),
     projectId: projectId.trim(),
   };
 }
 
 async function collectHoneybadger(): Promise<HoneybadgerCredentials> {
-  const token = await password({
-    message: "Honeybadger auth token:",
-    mask: "*",
-    validate: required("Token"),
-  });
+  let token: string;
+  for (;;) {
+    token = (
+      await password({
+        message: "Honeybadger auth token:",
+        mask: "*",
+        validate: required("Token"),
+      })
+    ).trim();
+    if (!(await warnIfUnexpectedFormat("Honeybadger", token))) break;
+  }
   const projectId = await input({
     message: "Honeybadger project id:",
     validate: required("Project id"),
   });
-  return { token: token.trim(), projectId: projectId.trim() };
+  return { token, projectId: projectId.trim() };
 }
 
 async function collectPostHog(): Promise<PosthogCredentials> {
-  const apiKey = await password({
-    message: "PostHog personal API key:",
-    mask: "*",
-    validate: required("API key"),
-  });
+  let apiKey: string;
+  for (;;) {
+    apiKey = (
+      await password({
+        message: "PostHog personal API key:",
+        mask: "*",
+        validate: required("API key"),
+      })
+    ).trim();
+    if (!(await warnIfUnexpectedFormat("PostHog API key", apiKey))) break;
+  }
   const projectId = await input({
     message: "PostHog project id:",
     validate: required("Project id"),
@@ -449,8 +545,8 @@ async function collectPostHog(): Promise<PosthogCredentials> {
   });
   const hostTrimmed = host.trim();
   return hostTrimmed.length > 0
-    ? { apiKey: apiKey.trim(), projectId: projectId.trim(), host: hostTrimmed }
-    : { apiKey: apiKey.trim(), projectId: projectId.trim() };
+    ? { apiKey, projectId: projectId.trim(), host: hostTrimmed }
+    : { apiKey, projectId: projectId.trim() };
 }
 
 async function collectLogRocket(): Promise<{ apiKey: string; appSlug: string }> {
