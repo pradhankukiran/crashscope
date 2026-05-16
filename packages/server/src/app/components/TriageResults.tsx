@@ -17,6 +17,7 @@ import {
   ExternalLink,
   Info,
   RotateCcw,
+  Terminal,
   Video,
 } from "lucide-react";
 import type { TriageIssue, TriageReport } from "@crashscope/core";
@@ -32,6 +33,8 @@ import {
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
+
+import { CopyButton } from "./CopyButton";
 
 export interface TriageResultsProps {
   report: TriageReport;
@@ -134,6 +137,7 @@ export function TriageResults({
 
   return (
     <div className="flex flex-col gap-6">
+      {empty ? null : <InstallCliCallout />}
       <SummaryCard report={report} {...(onReset ? { onReset } : {})} />
       {empty ? (
         <EmptyState window={report.window} />
@@ -148,6 +152,42 @@ export function TriageResults({
         </div>
       )}
     </div>
+  );
+}
+
+// ----- Install CLI callout -------------------------------------------------
+
+const INSTALL_LINES = ["$ npm i -g crashscope", "$ crashscope init && crashscope triage"];
+const INSTALL_CLIPBOARD = "npm i -g crashscope\ncrashscope init && crashscope triage";
+
+function InstallCliCallout(): JSX.Element {
+  return (
+    <Card className="border-primary/20 bg-primary/5 shadow-none">
+      <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-start gap-3">
+          <span className="mt-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+            <Terminal className="h-5 w-5" />
+          </span>
+          <div className="flex flex-col gap-2">
+            <h3 className="text-base font-semibold text-foreground">
+              Loved it? Run this on your terminal anytime.
+            </h3>
+            <pre className="overflow-x-auto rounded-md border bg-background px-3 py-2 font-mono text-xs leading-relaxed text-foreground">
+              <code>{INSTALL_LINES.join("\n")}</code>
+            </pre>
+          </div>
+        </div>
+        <div className="shrink-0 sm:self-center">
+          <CopyButton
+            value={INSTALL_CLIPBOARD}
+            label="Copy install command"
+            ariaLabel="Copy install command"
+            variant="default"
+            size="sm"
+          />
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
