@@ -117,10 +117,15 @@ export async function runInit(options: {
 
   // 5. Anthropic key (optional). When the user skips it we detect Claude Code
   //    auth in step 6 so the user has a definite answer either way.
-  const anthropicKey = await input({
+  //
+  //    The prompt uses `password()` so the key is echo-masked in the terminal
+  //    and never lands in shell scrollback in plain text. Inquirer's
+  //    `password` doesn't expose a "default empty" hint the same way `input`
+  //    does, so we accept a literal empty submission as "skip".
+  const anthropicKey = await password({
     message:
       "Anthropic API key (optional — leave blank to use Claude Code subscription):",
-    default: "",
+    mask: "*",
   });
   const anthropicTrimmed = anthropicKey.trim();
 
