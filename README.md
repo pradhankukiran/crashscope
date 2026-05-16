@@ -1,7 +1,7 @@
 <h1 align="center">crashscope</h1>
 
 <p align="center">
-  <strong>AI-powered error triage that knows what the user did before the crash.</strong>
+  <strong>An AI-powered error triage CLI that knows what the user did before the crash.</strong>
   <br/>
   Pairs your error tracker with session replay and uses Claude to produce ranked, actionable triage reports — for the terminal, Slack, or your own API consumer.
 </p>
@@ -17,28 +17,30 @@
 <p align="center">
   <a href="#quick-start--cli"><img src="https://img.shields.io/badge/install_CLI-npm_i_--g_crashscope-000?style=for-the-badge&logo=npm&logoColor=white"/></a>
   &nbsp;
-  <a href="#quick-start--server"><img src="https://img.shields.io/badge/Deploy_to_Vercel-▲-black?style=for-the-badge&logo=vercel&logoColor=white"/></a>
+  <a href="#for-teams-deploy-the-server-optional"><img src="https://img.shields.io/badge/Deploy_to_Vercel-▲-black?style=for-the-badge&logo=vercel&logoColor=white"/></a>
 </p>
 
 <p align="center">
+  <a href="packages/cli/README.md">CLI docs</a> ·
   <a href="#architecture">Architecture</a> ·
   <a href="#adapter-matrix">Adapters</a> ·
   <a href="#api-reference">API</a> ·
   <a href="#tech-stack">Tech stack</a> ·
-  <a href="packages/cli/README.md">CLI docs</a> ·
   <a href="packages/server/README.md">Server docs</a>
 </p>
 
 ---
 
-crashscope pulls fresh issues from your error tracker, joins each one against the user session that produced it, and asks Claude to investigate. The output is a ranked triage report — hypothesis, root-cause guess, files to inspect, user journey, confidence — delivered to your terminal, Slack, or a REST endpoint. Install the CLI for on-demand local runs, or deploy the server to expose `/api/triage` and a `/triage` Slack command across your team.
+crashscope pulls fresh issues from your error tracker, joins each one against the user session that produced it, and asks Claude to investigate. The output is a ranked triage report — hypothesis, root-cause guess, files to inspect, user journey, confidence — delivered to your terminal, Slack, or a REST endpoint. Install the CLI to triage from your terminal. Deploying the server is optional — it's how teams expose a `/triage` Slack command or a REST API on top of the same pipeline.
+
+Don't want to install just yet? Visit the [live demo](https://crashscope.vercel.app) (once it's deployed) to paste your credentials and preview the output.
 
 ## Why
 
 - **One digest, not five tabs.** Stop bouncing between Sentry, PostHog, GitHub, and your bug tracker to triage a single issue.
 - **Morning triage on autopilot.** Schedule a daily Slack `/triage`, or run the CLI before standup — you walk in with a ranked list, not an unread queue.
 - **Sessions tell stories errors can't.** Stack traces show what broke; replays show what the user did. crashscope hands Claude both, so the report ranks "what likely caused this" instead of "what threw".
-- **Local-first when you want it, hosted when you don't.** Same triage pipeline runs in the CLI on your laptop or as a Next.js app on Vercel — pick the surface, not the engine.
+- **CLI by default, server when your team needs it.** The same triage pipeline runs locally from your terminal, or — if you need a Slack `/triage` command or a REST endpoint — as a Next.js app on Vercel. Same engine, optional second surface.
 
 ## Architecture
 
@@ -59,15 +61,15 @@ crashscope pulls fresh issues from your error tracker, joins each one against th
 └──────────────────┘        │  agent ──> Claude
                             └─────────────────┘
 
-deployment modes
-────────────────
-local CLI       :  `crashscope triage`  ──>  prints to terminal / posts to Slack
-Vercel server   :  GET /api/triage      ──>  TriageReport JSON
-                   POST /api/triage     ──>  public demo with body credentials
-                   POST /api/slack/*    ──>  /triage slash command
+surfaces
+────────
+CLI (default)        :  `crashscope triage`  ──>  prints to terminal / posts to Slack
+Server (optional)    :  GET /api/triage      ──>  TriageReport JSON
+                        POST /api/triage     ──>  public demo with body credentials
+                        POST /api/slack/*    ──>  /triage slash command
 ```
 
-Both surfaces share `@crashscope/core` — same adapters, same investigation loop, same report shape. The split is purely about where the process runs.
+Both surfaces share `@crashscope/core` — same adapters, same investigation loop, same report shape. The CLI is the primary way in; the server is an optional surface for teams that need Slack or HTTP access on top of the same pipeline.
 
 ## Adapter matrix
 
@@ -107,7 +109,9 @@ crashscope triage --json | jq .
 
 The wizard validates each credential against the live API as it goes, so you find out the token is wrong *before* you save it. Full command and flag reference: [packages/cli/README.md](packages/cli/README.md).
 
-## Quick start — Server
+## For teams: deploy the server (optional)
+
+Deploy the Next.js server when your team wants `/triage` in Slack, a REST API to curl, or a public preview page where teammates can paste credentials and see crashscope work. The CLI alone is enough for personal use.
 
 ```sh
 git clone https://github.com/pradhankukiran/crashscope.git
@@ -122,7 +126,7 @@ Dev server runs at `http://localhost:3000`. The landing page includes a **public
 
 ## Authentication
 
-crashscope has two distinct auth paths for Claude. The **CLI** prefers your local Claude Code subscription — if the `claude` binary is on `PATH` and a `~/.claude` directory exists, that path is used and no API key is needed. If that's missing, the CLI falls back to `ANTHROPIC_API_KEY` (env var or `anthropic.apiKey` in the config file). The **server** is API-key only: serverless functions don't have access to the local Claude Code auth context, so `ANTHROPIC_API_KEY` is required for the GET endpoint and Slack bot. The **public demo** at `POST /api/triage` requires the visitor to bring their own key in the request body.
+crashscope has two distinct auth paths for Claude. The **CLI** prefers your local Claude Code subscription — if the `claude` binary is on `PATH` and a `~/.claude` directory exists, that path is used and no API key is needed. If that's missing, the CLI falls back to `ANTHROPIC_API_KEY` (env var or `anthropic.apiKey` in the config file). If you're going down the server path, note that serverless functions have no access to your local Claude Code auth context — so the **server** is API-key only: `ANTHROPIC_API_KEY` is required for the GET endpoint and Slack bot. The **public demo** at `POST /api/triage` requires the visitor to bring their own key in the request body.
 
 ## Monorepo layout
 
@@ -183,6 +187,8 @@ anthropic:
 The server reads the same shape from environment variables instead of a file — see [packages/server/.env.example](packages/server/.env.example) and the [server README](packages/server/README.md#environment-variables) for the full table.
 
 ## API reference
+
+This only applies when you deploy the server. The CLI doesn't expose any HTTP surface.
 
 ```http
 GET /api/triage?since=24h&limit=25&severity=fatal,error
