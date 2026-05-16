@@ -40,10 +40,17 @@ Adapters live in `packages/core/src/adapters/errors/` or `packages/core/src/adap
 2. **Zod-validate every API response.** Define a schema for the provider's payload, call `.parse()` on the raw response, then map the validated value into `NormalizedError` / `NormalizedSession`. Contract drift in the upstream API should fail loudly here, not silently propagate to the LLM.
 3. **Retry on `429` and `5xx`.** Exponential backoff with jitter, with a finite retry budget. Look at `packages/core/src/adapters/errors/sentry.ts` for the established pattern.
 4. **Throw `AdapterError` on persistent failure.** Use `AuthError` for `401`/`403`, `AdapterError` for everything else. Both are in `packages/core/src/errors.ts`. Include the upstream status code and a short, actionable message — this is what the user sees.
-5. **Add the credentials shape to `packages/core/src/types/config.ts`** and the provider name to `errorProviderSchema` / `sessionProviderSchema` in the same folder.
+5. **Add the credentials shape to `packages/core/src/types/config.ts`** and the provider name to `errorProviderSchema` in `packages/core/src/types/error.ts` (for error adapters) or `sessionProviderSchema` in `packages/core/src/types/session.ts` (for session adapters).
 6. **Wire it into the factory** in `packages/cli/src/adapters/factory.ts` (CLI) and `packages/server/src/lib/triage.ts` (server) so both surfaces can use it.
 7. **Extend the wizard** in `packages/cli/src/commands/init.ts` so `crashscope init` prompts for the new credentials.
 8. **Document it.** Update the adapter matrix in the root `README.md`, the env-var table in `packages/server/README.md`, and the YAML config shape there too.
+9. **Verify it.** From the repo root:
+   ```sh
+   pnpm -r build
+   crashscope triage --debug              # run against a real account
+   tail -n 200 ~/.crashscope/debug.log    # confirm the adapter fired, no 4xx/5xx churn
+   ```
+   `--debug` writes raw API errors (tokens redacted) to `~/.crashscope/debug.log` so you can see exactly what the adapter sent and received. Don't ship without one clean end-to-end run.
 
 Once the adapter is exported from `@crashscope/core/adapters/{errors,sessions}`, both the CLI and the server pick it up.
 

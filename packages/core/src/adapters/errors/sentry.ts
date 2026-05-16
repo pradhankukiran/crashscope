@@ -1,6 +1,10 @@
 import { z } from "zod";
 
-import { AdapterError, ValidationError } from "../../errors.js";
+import {
+  AdapterError,
+  ValidationError,
+  classifyHttpFailure,
+} from "../../errors.js";
 import type {
   ErrorAdapter,
   FetchRecentOptions,
@@ -336,6 +340,9 @@ function buildTags(event: SentryEvent | null): Record<string, string> {
 function buildSampleUserIds(event: SentryEvent | null): string[] {
   const user = event?.user;
   if (!user) return [];
+  // The empty-string guard intentionally lets `user.id === 0` through:
+  // `String(0)` is `"0"`, which is a meaningful, distinct user id for systems
+  // that count from zero. We only exclude `null`, `undefined`, and `""`.
   if (user.id !== null && user.id !== undefined && user.id !== "") {
     return [String(user.id)];
   }
@@ -449,21 +456,39 @@ export class SentryAdapter implements ErrorAdapter {
   public async fetchRecent(opts: FetchRecentOptions): Promise<NormalizedError[]> {
     const limit = Math.max(1, Math.floor(opts.limit ?? DEFAULT_LIMIT));
     const statsPeriod = pickStatsPeriod(opts.since);
+    // `sort=date` orders by `lastSeen` descending so pagination/truncation is
+    // deterministic across calls. Sentry otherwise uses a relevance score that
+    // varies between requests.
     const path =
       `/api/0/projects/${encodeURIComponent(this.org)}/${encodeURIComponent(this.project)}/issues/` +
       `?statsPeriod=${encodeURIComponent(statsPeriod)}` +
       `&query=${encodeURIComponent("is:unresolved")}` +
+      `&sort=date` +
       `&limit=${limit}`;
 
     const issues = await this.sentryGet(path, sentryIssueListSchema);
 
+    // Sentry's `statsPeriod` only takes a discrete set of windows ('24h',
+    // '14d', ''). `pickStatsPeriod` rounds up to the smallest covering one,
+    // so a 1h request will return up to 24h of issues. Post-filter to honor
+    // the caller's `since` exactly. Note: this runs *before* the limit slice,
+    // so we may legitimately return fewer than `limit` results.
+    const sinceMs = opts.since.getTime();
+    const recent = issues.filter((issue) => {
+      if (!issue.lastSeen) return false;
+      const lastSeen = Date.parse(issue.lastSeen);
+      return Number.isFinite(lastSeen) && lastSeen >= sinceMs;
+    });
+
     const allowed = opts.severities ? new Set<Severity>(opts.severities) : null;
     const filtered = allowed
-      ? issues.filter((issue) => allowed.has(mapSeverity(issue.level)))
-      : issues;
+      ? recent.filter((issue) => allowed.has(mapSeverity(issue.level)))
+      : recent;
+
+    const bounded = filtered.slice(0, limit);
 
     const normalized: NormalizedError[] = [];
-    for (const issue of filtered) {
+    for (const issue of bounded) {
       const event = await this.fetchLatestEvent(issue.id);
       normalized.push(this.toNormalized(issue, event));
     }
@@ -493,7 +518,10 @@ export class SentryAdapter implements ErrorAdapter {
     } catch (err) {
       // Some issues legitimately have no fetchable latest event (e.g. retention
       // pruning). Don't fail the whole list — degrade to a stack-less record.
-      if (err instanceof AdapterError && err.message.includes("404")) {
+      // Use a word-boundary regex so we don't accidentally match `404` inside
+      // a longer status code or body snippet (e.g. "HTTP 4040"). When the
+      // core sibling adds a structured `status` field we can drop the regex.
+      if (err instanceof AdapterError && /HTTP 404\b/.test(err.message)) {
         return null;
       }
       throw err;
@@ -510,9 +538,13 @@ export class SentryAdapter implements ErrorAdapter {
     const firstSeen = toIsoString(issue.firstSeen ?? null);
     const lastSeen = toIsoString(issue.lastSeen ?? null);
     if (!firstSeen || !lastSeen) {
+      // Reference the issue id (and shortId if present) so operators can pull
+      // the offending payload out of Sentry directly when triaging.
+      const ref = issue.shortId ? `${issue.id} (${issue.shortId})` : issue.id;
       throw new AdapterError(
         PROVIDER,
-        `issue ${issue.id} is missing firstSeen/lastSeen timestamps`,
+        `issue ${ref} is missing firstSeen=${String(issue.firstSeen)} ` +
+          `lastSeen=${String(issue.lastSeen)} — cannot normalize`,
       );
     }
 
@@ -570,13 +602,26 @@ export class SentryAdapter implements ErrorAdapter {
           throw new AdapterError(
             PROVIDER,
             `network error calling ${path}: ${describeError(err)}`,
-            { cause: err },
+            { cause: err, retryable: true },
           );
         }
         await sleep(backoffDelay(attempt));
         continue;
       }
       clearTimeout(timer);
+
+      if (response.status === 401 || response.status === 403) {
+        // Auth failures are terminal: surfacing as AuthError lets the CLI
+        // render a targeted "check credentials" hint instead of a generic
+        // adapter trace, and avoids burning the retry budget on a problem
+        // retries can't fix.
+        const bodyText = await safeReadText(response);
+        throw classifyHttpFailure(
+          PROVIDER,
+          response.status,
+          `${truncate(bodyText, 400)} (path: ${path})`,
+        );
+      }
 
       if (response.status === 429) {
         const retryAfterMs =
@@ -586,6 +631,7 @@ export class SentryAdapter implements ErrorAdapter {
           throw new AdapterError(
             PROVIDER,
             `rate limited (429) calling ${path} after ${MAX_RETRIES + 1} attempts`,
+            { retryable: true },
           );
         }
         await sleep(retryAfterMs);
@@ -598,6 +644,7 @@ export class SentryAdapter implements ErrorAdapter {
           throw new AdapterError(
             PROVIDER,
             `server error ${response.status} calling ${path} after ${MAX_RETRIES + 1} attempts`,
+            { retryable: true },
           );
         }
         await sleep(backoffDelay(attempt));
@@ -606,9 +653,10 @@ export class SentryAdapter implements ErrorAdapter {
 
       if (!response.ok) {
         const bodyText = await safeReadText(response);
-        throw new AdapterError(
+        throw classifyHttpFailure(
           PROVIDER,
-          `HTTP ${response.status} calling ${path}: ${truncate(bodyText, 400)}`,
+          response.status,
+          `${truncate(bodyText, 400)} (path: ${path})`,
         );
       }
 
@@ -637,7 +685,10 @@ export class SentryAdapter implements ErrorAdapter {
     throw new AdapterError(
       PROVIDER,
       `exhausted retries calling ${path}: ${describeError(lastError)}`,
-      lastError instanceof Error ? { cause: lastError } : undefined,
+      {
+        retryable: true,
+        ...(lastError instanceof Error ? { cause: lastError } : {}),
+      },
     );
   }
 }
