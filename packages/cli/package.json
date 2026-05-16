@@ -1,7 +1,34 @@
 {
   "name": "@pradhankukiran/crashscope",
   "version": "0.1.0",
-  "description": "AI-powered error triage CLI for Sentry, Rollbar, Bugsnag, Honeybadger + PostHog/LogRocket sessions.",
+  "description": "AI-powered error triage CLI: pulls errors from Sentry / Rollbar / Bugsnag / Honeybadger, joins them with PostHog or LogRocket session replays, and uses Claude to produce ranked, actionable triage reports.",
+  "keywords": [
+    "ai",
+    "claude",
+    "anthropic",
+    "triage",
+    "error-tracking",
+    "session-replay",
+    "sentry",
+    "posthog",
+    "rollbar",
+    "bugsnag",
+    "honeybadger",
+    "logrocket",
+    "developer-tools",
+    "cli",
+    "observability"
+  ],
+  "homepage": "https://github.com/pradhankukiran/crashscope#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pradhankukiran/crashscope.git",
+    "directory": "packages/cli"
+  },
+  "bugs": {
+    "url": "https://github.com/pradhankukiran/crashscope/issues"
+  },
+  "author": "Kiran Kumar Pradhan <kiran@ecorrouge.com>",
   "license": "MIT",
   "type": "module",
   "bin": {

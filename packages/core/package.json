@@ -1,14 +1,40 @@
 {
   "name": "@pradhankukiran/crashscope-core",
   "version": "0.1.0",
-  "description": "Core types, schemas, and adapter interfaces for crashscope.",
+  "description": "Core types, schemas, and Claude investigation loop powering the crashscope CLI and server.",
+  "keywords": [
+    "ai",
+    "claude",
+    "anthropic",
+    "triage",
+    "error-tracking",
+    "session-replay",
+    "sentry",
+    "posthog",
+    "rollbar",
+    "bugsnag",
+    "honeybadger",
+    "logrocket",
+    "developer-tools",
+    "cli",
+    "observability"
+  ],
+  "homepage": "https://github.com/pradhankukiran/crashscope#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pradhankukiran/crashscope.git",
+    "directory": "packages/core"
+  },
+  "bugs": {
+    "url": "https://github.com/pradhankukiran/crashscope/issues"
+  },
+  "author": "Kiran Kumar Pradhan <kiran@ecorrouge.com>",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "files": [
     "dist",
-    "src",
     "README.md"
   ],
   "exports": {
@@ -63,6 +89,6 @@
     "typescript": "^5.6.0"
   },
   "publishConfig": {
-    "access": "restricted"
+    "access": "public"
   }
 }
