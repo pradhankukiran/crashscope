@@ -1,2 +1,22 @@
 #!/usr/bin/env node
-import("../dist/index.js");
+// Surface a friendly message when the compiled CLI is missing or fails to
+// load. Without this, `npm i -g crashscope` followed by `crashscope` from a
+// half-installed prefix would explode as an UnhandledPromiseRejection — the
+// node default handler prints the full module-not-found trace and a
+// "(node:…) [DEP_…]" warning that buries the actionable hint.
+import("../dist/index.js").catch((err) => {
+  const isModuleMissing =
+    err && typeof err === "object" && "code" in err &&
+    (err.code === "ERR_MODULE_NOT_FOUND" || err.code === "MODULE_NOT_FOUND");
+  const heading = isModuleMissing
+    ? "crashscope: build artefacts not found."
+    : "crashscope: failed to load.";
+  process.stderr.write(heading + "\n");
+  process.stderr.write(
+    `${err && err.message ? err.message : String(err)}\n`,
+  );
+  process.stderr.write(
+    "If you installed from source, run `pnpm --filter crashscope build` first.\n",
+  );
+  process.exit(1);
+});
