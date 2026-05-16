@@ -3,7 +3,7 @@ import {
   resolveAnthropicAuth,
   type AuthResolution,
   type CrashscopeConfig,
-} from "@crashscope/core";
+} from "@pradhankukiran/crashscope-core";
 
 /**
  * Outcome of the CLI's Anthropic-auth detection step.

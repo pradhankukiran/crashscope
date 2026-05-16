@@ -16,7 +16,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertCircle } from "lucide-react";
-import type { TriageReport } from "@crashscope/core";
+import type { TriageReport } from "@pradhankukiran/crashscope-core";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {

@@ -5,7 +5,7 @@ events under a shared user ID — so the crashscope CLI has real data to triage.
 
 The same Sentry + PostHog data is consumed by `crashscope triage` (CLI) and
 by the server's `/api/triage` endpoint — both surfaces share the adapter and
-investigation pipeline in `@crashscope/core`, so the test harness exercises
+investigation pipeline in `@pradhankukiran/crashscope-core`, so the test harness exercises
 the whole stack with one set of synthetic events.
 
 No build step. CDN-loaded SDKs. Open it in a browser.

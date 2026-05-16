@@ -1,6 +1,6 @@
 import { writeFile } from "node:fs/promises";
 import { extname } from "node:path";
-import type { TriageReport } from "@crashscope/core";
+import type { TriageReport } from "@pradhankukiran/crashscope-core";
 import { renderJsonReport } from "./json.js";
 import { renderMarkdownReport } from "./markdown.js";
 import { renderTerminalReport } from "./terminal.js";

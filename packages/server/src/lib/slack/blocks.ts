@@ -10,7 +10,7 @@
  * rendering 30 fat issue cards is unreadable. We cap at the top 5 issues and
  * indicate overflow.
  */
-import type { TriageIssue, TriageReport } from "@crashscope/core";
+import type { TriageIssue, TriageReport } from "@pradhankukiran/crashscope-core";
 
 /** Maximum issues rendered inline; the rest are summarized as a count. */
 const TOP_N = 5;

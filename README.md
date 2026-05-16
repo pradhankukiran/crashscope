@@ -51,7 +51,7 @@ crashscope pulls fresh issues from your error tracker, joins each one against th
 │ Bugsnag,         │                            │  └─────────┘ └──────────────┘ │
 │ Honeybadger      │ ───┐                       │  ┌─────────┐ ┌──────────────┐ │
 └──────────────────┘    │   ┌─────────────────┐ │  │ JSON    │ │ REST /api    │ │
-                        ├──>│ @crashscope/core│─┼──┤         │ │ /triage      │ │
+                        ├──>│ @pradhankukiran/crashscope-core│─┼──┤         │ │ /triage      │ │
 ┌──────────────────┐    │   │                 │ │  └─────────┘ └──────────────┘ │
 │ session tools    │ ───┘   │  adapters       │ │                               │
 │ PostHog,         │        │   │             │ └───────────────────────────────┘
@@ -67,7 +67,7 @@ Server (optional)    :  GET /api/triage      ──>  TriageReport JSON
                         POST /api/slack/*    ──>  /triage slash command
 ```
 
-Both surfaces share `@crashscope/core` — same adapters, same investigation loop, same report shape. The CLI is the primary way in; the server is an optional surface for teams that need Slack or HTTP access on top of the same pipeline.
+Both surfaces share `@pradhankukiran/crashscope-core` — same adapters, same investigation loop, same report shape. The CLI is the primary way in; the server is an optional surface for teams that need Slack or HTTP access on top of the same pipeline.
 
 ## Adapter matrix
 
@@ -93,7 +93,7 @@ Both surfaces share `@crashscope/core` — same adapters, same investigation loo
 | Outputs  | REST API     | ✓      |
 | Outputs  | JSON         | ✓      |
 
-All adapters live in `packages/core/src/adapters/{errors,sessions}` and implement the `ErrorAdapter` / `SessionAdapter` interfaces from `@crashscope/core`. Adding a new provider is roughly 100 lines plus a Zod schema — see [CONTRIBUTING.md](CONTRIBUTING.md#adding-a-new-adapter).
+All adapters live in `packages/core/src/adapters/{errors,sessions}` and implement the `ErrorAdapter` / `SessionAdapter` interfaces from `@pradhankukiran/crashscope-core`. Adding a new provider is roughly 100 lines plus a Zod schema — see [CONTRIBUTING.md](CONTRIBUTING.md#adding-a-new-adapter).
 
 ## Quick start — CLI
 
@@ -159,7 +159,7 @@ If you're going down the server path, note that serverless functions have no acc
 ```
 crashscope/
 ├── packages/
-│   ├── core/      # @crashscope/core — types, Zod schemas, agent loop, 4 error + 2 session adapters
+│   ├── core/      # @pradhankukiran/crashscope-core — types, Zod schemas, agent loop, 4 error + 2 session adapters
 │   ├── cli/       # crashscope — CLI; commands: init, triage, config (install from source for now)
 │   └── server/    # @crashscope/server — Next.js app: landing page, REST /api/triage, Slack bot
 ├── examples/
@@ -183,7 +183,7 @@ Per-package dev commands:
 
 | Package              | Dev command                              | Notes                                |
 | -------------------- | ---------------------------------------- | ------------------------------------ |
-| `@crashscope/core`   | `pnpm --filter @crashscope/core build`   | Pure TS — no watch mode needed.      |
+| `@pradhankukiran/crashscope-core`   | `pnpm --filter @pradhankukiran/crashscope-core build`   | Pure TS — no watch mode needed.      |
 | `crashscope`         | `pnpm --filter crashscope build`         | Then run `node packages/cli/bin/crashscope …`. |
 | `@crashscope/server` | `pnpm --filter @crashscope/server dev`   | Next.js dev server on port 3000.     |
 
@@ -230,7 +230,7 @@ Content-Type: application/json
   "opts":        { "since": "24h", "limit": 25 } }
 ```
 
-Both return a `TriageReport` JSON object (typed in `@crashscope/core`). `since` accepts `1h | 6h | 24h | 7d | 14d | 30d`. `severity` is a comma-separated subset of `fatal,error,warning,info`. Errors return `{ error, message, requestId }`; an `X-Request-Id` header is set on every response for log correlation. Full status-code table in [packages/server/README.md](packages/server/README.md#rest-api).
+Both return a `TriageReport` JSON object (typed in `@pradhankukiran/crashscope-core`). `since` accepts `1h | 6h | 24h | 7d | 14d | 30d`. `severity` is a comma-separated subset of `fatal,error,warning,info`. Errors return `{ error, message, requestId }`; an `X-Request-Id` header is set on every response for log correlation. Full status-code table in [packages/server/README.md](packages/server/README.md#rest-api).
 
 **Limit caps differ by endpoint.** `GET /api/triage` accepts `limit` up to **100** (default 25). `POST /api/triage` caps `opts.limit` at **25** — the public demo path is intentionally tighter than the bearer-authed GET. Requests above the cap return `400 Bad Request`.
 

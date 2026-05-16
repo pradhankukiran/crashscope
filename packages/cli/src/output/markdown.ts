@@ -2,7 +2,7 @@ import type {
   Severity,
   TriageIssue,
   TriageReport,
-} from "@crashscope/core";
+} from "@pradhankukiran/crashscope-core";
 
 /**
  * Soft column target used for wrapped prose. Markdown is paste-friendly even

@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { access } from "node:fs/promises";
 import chalk from "chalk";
-import { ConfigError, type CrashscopeConfig } from "@crashscope/core";
+import { ConfigError, type CrashscopeConfig } from "@pradhankukiran/crashscope-core";
 import { loadConfig } from "../config/load.js";
 import { getConfigPath } from "../config/paths.js";
 import { maskPreservingTail } from "../util/redact.js";

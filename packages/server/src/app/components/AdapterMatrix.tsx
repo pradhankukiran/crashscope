@@ -85,7 +85,7 @@ export function AdapterMatrix(): JSX.Element {
           <p className="mx-auto mt-3 max-w-2xl text-muted-foreground">
             Adapters live in{" "}
             <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-sm text-primary">
-              @crashscope/core
+              @pradhankukiran/crashscope-core
             </code>{" "}
             and normalize each provider into a shared error and session shape.
           </p>

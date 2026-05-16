@@ -4,7 +4,7 @@ import type {
   Severity,
   TriageIssue,
   TriageReport,
-} from "@crashscope/core";
+} from "@pradhankukiran/crashscope-core";
 
 /**
  * Width reserved for the label column of each field row.

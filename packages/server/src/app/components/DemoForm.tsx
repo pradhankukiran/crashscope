@@ -28,7 +28,7 @@ import {
   Loader2,
   Lock,
 } from "lucide-react";
-import type { TriageReport } from "@crashscope/core";
+import type { TriageReport } from "@pradhankukiran/crashscope-core";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";

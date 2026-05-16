@@ -1,4 +1,4 @@
-# @crashscope/core
+# @pradhankukiran/crashscope-core
 
 Shared types, Zod schemas, adapter interfaces, and error classes for [crashscope](../../README.md). Every other package in the monorepo — adapters, CLI, runner — depends on this one. It depends only on `zod`.
 
@@ -19,11 +19,11 @@ import {
   type ErrorAdapter,
   normalizedErrorSchema,
   AdapterError,
-} from "@crashscope/core";
+} from "@pradhankukiran/crashscope-core";
 
 // Or via the subpath exports if you prefer.
-import type { SessionAdapter } from "@crashscope/core/types";
-import { ConfigError } from "@crashscope/core/errors";
+import type { SessionAdapter } from "@pradhankukiran/crashscope-core/types";
+import { ConfigError } from "@pradhankukiran/crashscope-core/errors";
 ```
 
 ## Example: implementing an adapter
@@ -34,7 +34,7 @@ import {
   type FetchRecentOptions,
   type NormalizedError,
   AdapterError,
-} from "@crashscope/core";
+} from "@pradhankukiran/crashscope-core";
 
 export class SentryAdapter implements ErrorAdapter {
   public readonly name = "sentry";

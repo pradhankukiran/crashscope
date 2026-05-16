@@ -35,12 +35,12 @@ importers:
 
   packages/cli:
     dependencies:
-      '@crashscope/core':
-        specifier: workspace:*
-        version: link:../core
       '@inquirer/prompts':
         specifier: ^7.0.0
         version: 7.10.1(@types/node@22.19.19)
+      '@pradhankukiran/crashscope-core':
+        specifier: workspace:*
+        version: link:../core
       boxen:
         specifier: ^8.0.0
         version: 8.0.1
@@ -82,12 +82,12 @@ importers:
 
   packages/server:
     dependencies:
-      '@crashscope/core':
-        specifier: workspace:*
-        version: link:../core
       '@hookform/resolvers':
         specifier: ^5.2.2
         version: 5.2.2(react-hook-form@7.75.0(react@18.3.1))
+      '@pradhankukiran/crashscope-core':
+        specifier: workspace:*
+        version: link:../core
       '@radix-ui/react-label':
         specifier: ^2.1.8
         version: 2.1.8(@types/react-dom@18.3.7(@types/react@18.3.28))(@types/react@18.3.28)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)

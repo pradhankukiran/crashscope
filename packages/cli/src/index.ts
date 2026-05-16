@@ -5,7 +5,7 @@ import {
   AuthError,
   ConfigError,
   ValidationError,
-} from "@crashscope/core";
+} from "@pradhankukiran/crashscope-core";
 import { runConfig, type ConfigAction } from "./commands/config.js";
 import { runInit } from "./commands/init.js";
 import {

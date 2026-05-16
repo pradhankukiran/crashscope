@@ -7,13 +7,13 @@
  * stages keeps this module reusable from tests and from non-API call sites
  * (e.g. health checks) without forcing every env var to be present.
  *
- * Errors are surfaced via {@link import("@crashscope/core").ConfigError} so
+ * Errors are surfaced via {@link import("@pradhankukiran/crashscope-core").ConfigError} so
  * API handlers can render a stable 500 with a helpful `missing` list.
  */
 import { z } from "zod";
-import { ConfigError } from "@crashscope/core";
+import { ConfigError } from "@pradhankukiran/crashscope-core";
 
-/** Recognised error-tracker providers. Mirrors `@crashscope/core`'s enum. */
+/** Recognised error-tracker providers. Mirrors `@pradhankukiran/crashscope-core`'s enum. */
 const errorProviderEnum = z.enum([
   "sentry",
   "rollbar",
@@ -21,7 +21,7 @@ const errorProviderEnum = z.enum([
   "honeybadger",
 ]);
 
-/** Recognised session/replay providers. Mirrors `@crashscope/core`'s enum. */
+/** Recognised session/replay providers. Mirrors `@pradhankukiran/crashscope-core`'s enum. */
 const sessionProviderEnum = z.enum(["posthog", "logrocket"]);
 
 /**

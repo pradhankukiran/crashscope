@@ -20,7 +20,7 @@ import {
   Terminal,
   Video,
 } from "lucide-react";
-import type { TriageIssue, TriageReport } from "@crashscope/core";
+import type { TriageIssue, TriageReport } from "@pradhankukiran/crashscope-core";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";

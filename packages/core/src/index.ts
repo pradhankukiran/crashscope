@@ -1,5 +1,5 @@
 /**
- * @crashscope/core — types, Zod schemas, adapter interfaces, and error
+ * @pradhankukiran/crashscope-core — types, Zod schemas, adapter interfaces, and error
  * classes shared by every other crashscope package.
  *
  * This package has no runtime dependencies beyond `zod`. Keep it that way:

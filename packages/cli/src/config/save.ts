@@ -5,7 +5,7 @@ import {
   ValidationError,
   crashscopeConfigSchema,
   type CrashscopeConfig,
-} from "@crashscope/core";
+} from "@pradhankukiran/crashscope-core";
 import { getConfigPath } from "./paths.js";
 
 /**

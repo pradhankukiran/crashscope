@@ -55,7 +55,7 @@ const monorepoRoot = resolve(__dirname, "../..");
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  transpilePackages: ["@crashscope/core"],
+  transpilePackages: ["@pradhankukiran/crashscope-core"],
   // Emit a self-contained Node server at `.next/standalone/` for Docker.
   // The runtime entrypoint is `packages/server/server.js` relative to the
   // standalone output (Next preserves the monorepo layout inside it).

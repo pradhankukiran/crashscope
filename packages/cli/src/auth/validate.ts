@@ -13,7 +13,7 @@
  *                                surfaces a warning but still lets the user
  *                                save the credential).
  *
- * Adapters in `@crashscope/core` already classify HTTP failures via
+ * Adapters in `@pradhankukiran/crashscope-core` already classify HTTP failures via
  * `classifyHttpFailure`, but those are tied to a fully-constructed adapter +
  * its richer normalisation contract. Re-using them here would pull in the
  * adapter constructor surface and mean a failed probe also touches the
@@ -26,7 +26,7 @@ import type {
   PosthogCredentials,
   RollbarCredentials,
   SentryCredentials,
-} from "@crashscope/core";
+} from "@pradhankukiran/crashscope-core";
 
 /**
  * Default per-request timeout for credential probes. The wizard prompts the

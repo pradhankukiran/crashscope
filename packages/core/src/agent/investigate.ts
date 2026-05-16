@@ -274,7 +274,7 @@ function combineSignals(
  * Z-shaped raw shape mirror of {@link triageFindingSchema} for the SDK tool().
  *
  * The SDK accepts either zod v3 or v4 raw shapes; we keep this in v3 since
- * the rest of `@crashscope/core` is on zod v3. Bounds mirror the canonical
+ * the rest of `@pradhankukiran/crashscope-core` is on zod v3. Bounds mirror the canonical
  * constants in `./tools.js` so a divergence between the two would be loud.
  */
 const triageFindingRawShape = {

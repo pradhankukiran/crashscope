@@ -1,4 +1,4 @@
-import type { TriageReport } from "@crashscope/core";
+import type { TriageReport } from "@pradhankukiran/crashscope-core";
 
 /**
  * Indentation used by {@link renderJsonReport} when `compact` is false.

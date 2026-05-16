@@ -73,7 +73,7 @@ The build context must be the monorepo root (because pnpm workspaces).
 
 ```bash
 pnpm install          # from the repo root
-pnpm -r build         # build @crashscope/core so the server can import it
+pnpm -r build         # build @pradhankukiran/crashscope-core so the server can import it
 cp packages/server/.env.example packages/server/.env.local
 # edit .env.local with your provider credentials
 pnpm --filter @crashscope/server dev
@@ -126,7 +126,7 @@ Parameters:
 
 Responses:
 
-- `200 OK` — full `TriageReport` JSON (see `@crashscope/core` types).
+- `200 OK` — full `TriageReport` JSON (see `@pradhankukiran/crashscope-core` types).
 - `400 Bad Request` — bad query parameter.
 - `401 Unauthorized` — missing or invalid bearer token.
 - `5xx` — adapter, auth, or pipeline failure. Body: `{ error, message, requestId }`.
@@ -142,7 +142,7 @@ POST /api/triage
 Content-Type: application/json
 ```
 
-Body (validated with Zod, mirroring `crashscopeConfigSchema` from `@crashscope/core`):
+Body (validated with Zod, mirroring `crashscopeConfigSchema` from `@pradhankukiran/crashscope-core`):
 
 ```jsonc
 {

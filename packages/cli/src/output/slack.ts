@@ -1,10 +1,10 @@
-import { AdapterError } from "@crashscope/core";
+import { AdapterError } from "@pradhankukiran/crashscope-core";
 import type {
   CrashscopeConfig,
   Severity,
   TriageIssue,
   TriageReport,
-} from "@crashscope/core";
+} from "@pradhankukiran/crashscope-core";
 
 /**
  * Maximum length permitted by Slack's `section` block `text` field.

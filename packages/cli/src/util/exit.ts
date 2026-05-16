@@ -3,7 +3,7 @@ import {
   AuthError,
   ConfigError,
   ValidationError,
-} from "@crashscope/core";
+} from "@pradhankukiran/crashscope-core";
 
 /**
  * Process exit codes the CLI emits.

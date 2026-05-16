@@ -15,7 +15,7 @@ import {
   type Severity,
   type TriageIssue,
   type TriageReport,
-} from "@crashscope/core";
+} from "@pradhankukiran/crashscope-core";
 import { createErrorAdapter, createSessionAdapter } from "../adapters/index.js";
 import { detectAnthropicAuth } from "../auth/detect.js";
 import { loadConfig } from "../config/load.js";

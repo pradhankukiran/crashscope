@@ -3,7 +3,7 @@
  *
  * Surfaces env misconfiguration loudly at startup instead of waiting for the
  * first request to fail. The validation is intentionally inlined here so we
- * don't have to navigate the edge-vs-node bundling tradeoff: `@crashscope/core`
+ * don't have to navigate the edge-vs-node bundling tradeoff: `@pradhankukiran/crashscope-core`
  * transitively pulls `node:os`/`node:fs`/`node:child_process` which the edge
  * runtime can't load, and any dynamic import of a richer validator either
  * blows up the edge build or gets dropped from the Next.js standalone output.

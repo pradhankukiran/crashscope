@@ -3,17 +3,17 @@ import {
   type CrashscopeConfig,
   type ErrorAdapter,
   type SessionAdapter,
-} from "@crashscope/core";
+} from "@pradhankukiran/crashscope-core";
 import {
   BugsnagAdapter,
   HoneybadgerAdapter,
   RollbarAdapter,
   SentryAdapter,
-} from "@crashscope/core/adapters/errors";
+} from "@pradhankukiran/crashscope-core/adapters/errors";
 import {
   LogRocketAdapter,
   PostHogAdapter,
-} from "@crashscope/core/adapters/sessions";
+} from "@pradhankukiran/crashscope-core/adapters/sessions";
 
 /**
  * Construct the configured error-tracker adapter.

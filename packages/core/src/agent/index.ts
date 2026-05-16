@@ -4,7 +4,7 @@
  * This re-exports the public surface consumed by the CLI / orchestrator. The
  * package-root barrel (`src/index.ts`) is owned by the maintainer; we keep
  * this scoped barrel so the agent module can be imported via
- * `@crashscope/core/agent` if/when the root re-exports it.
+ * `@pradhankukiran/crashscope-core/agent` if/when the root re-exports it.
  */
 export { investigate } from "./investigate.js";
 export type { InvestigateInput } from "./investigate.js";

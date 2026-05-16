@@ -18,7 +18,7 @@ import {
   type RollbarCredentials,
   type SentryCredentials,
   type SessionProvider,
-} from "@crashscope/core";
+} from "@pradhankukiran/crashscope-core";
 import { detectAnthropicAuth } from "../auth/detect.js";
 import {
   validateAnthropic,

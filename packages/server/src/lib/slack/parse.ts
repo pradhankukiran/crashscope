@@ -11,7 +11,7 @@
  * user from getting *some* report — the slash command is interactive and we
  * prefer "did something sensible" over "rejected outright".
  */
-import type { Severity } from "@crashscope/core";
+import type { Severity } from "@pradhankukiran/crashscope-core";
 import { isSinceKeyword, type SinceKeyword } from "../triage.js";
 
 /** Parsed `/triage` command options. */

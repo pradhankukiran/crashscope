@@ -7,7 +7,7 @@
  *   3. Instantiate the selected error + session adapters.
  *   4. Fetch recent errors; for each error with a sample user, fetch the
  *      nearest session.
- *   5. Pass the joined batch to `investigate()` from `@crashscope/core/agent`.
+ *   5. Pass the joined batch to `investigate()` from `@pradhankukiran/crashscope-core/agent`.
  *   6. Assemble + return a {@link TriageReport}.
  *
  * Failures inside individual adapter calls or per-issue investigations do not
@@ -24,24 +24,24 @@ import {
   type TriageIssue,
   type TriageReport,
   type TriageSummary,
-} from "@crashscope/core";
-import { investigate, resolveAnthropicAuth } from "@crashscope/core/agent";
-import type { AuthResolution } from "@crashscope/core/agent";
+} from "@pradhankukiran/crashscope-core";
+import { investigate, resolveAnthropicAuth } from "@pradhankukiran/crashscope-core/agent";
+import type { AuthResolution } from "@pradhankukiran/crashscope-core/agent";
 import {
   BugsnagAdapter,
   HoneybadgerAdapter,
   RollbarAdapter,
   SentryAdapter,
-} from "@crashscope/core/adapters/errors";
+} from "@pradhankukiran/crashscope-core/adapters/errors";
 import {
   LogRocketAdapter,
   PostHogAdapter,
-} from "@crashscope/core/adapters/sessions";
+} from "@pradhankukiran/crashscope-core/adapters/sessions";
 import type {
   ErrorAdapter,
   FetchRecentOptions,
   SessionAdapter,
-} from "@crashscope/core";
+} from "@pradhankukiran/crashscope-core";
 import { buildConfig } from "./config.js";
 
 /**

@@ -45,7 +45,7 @@ COPY packages/server/package.json ./packages/server/
 RUN pnpm install --frozen-lockfile
 
 # -----------------------------------------------------------------------------
-# Stage 2: builder — compile @crashscope/core and build the Next.js app.
+# Stage 2: builder — compile @pradhankukiran/crashscope-core and build the Next.js app.
 # -----------------------------------------------------------------------------
 FROM node:20-alpine AS builder
 WORKDIR /app
@@ -68,8 +68,8 @@ COPY . .
 # Disable Next telemetry inside CI/build environments.
 ENV NEXT_TELEMETRY_DISABLED=1
 
-# Build core first (server imports from `@crashscope/core/dist`), then Next.
-RUN pnpm --filter @crashscope/core build
+# Build core first (server imports from `@pradhankukiran/crashscope-core/dist`), then Next.
+RUN pnpm --filter @pradhankukiran/crashscope-core build
 RUN pnpm --filter @crashscope/server build
 
 # -----------------------------------------------------------------------------

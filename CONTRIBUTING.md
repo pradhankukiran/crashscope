@@ -15,7 +15,7 @@ Thanks for your interest! crashscope is open-source friendly — adapters, outpu
   import { foo } from "./foo";
   ```
 
-- **No runtime deps in `@crashscope/core` beyond `zod` and `@anthropic-ai/claude-agent-sdk`.** Adapters and the CLI depend on `core`, never the other way around.
+- **No runtime deps in `@pradhankukiran/crashscope-core` beyond `zod` and `@anthropic-ai/claude-agent-sdk`.** Adapters and the CLI depend on `core`, never the other way around.
 
 ## Commit messages
 
@@ -52,7 +52,7 @@ Adapters live in `packages/core/src/adapters/errors/` or `packages/core/src/adap
    ```
    `--debug` writes raw API errors (tokens redacted) to `~/.crashscope/debug.log` so you can see exactly what the adapter sent and received. Don't ship without one clean end-to-end run.
 
-Once the adapter is exported from `@crashscope/core/adapters/{errors,sessions}`, both the CLI and the server pick it up.
+Once the adapter is exported from `@pradhankukiran/crashscope-core/adapters/{errors,sessions}`, both the CLI and the server pick it up.
 
 ## Branch / PR workflow
 
@@ -67,8 +67,8 @@ Once the adapter is exported from `@crashscope/core/adapters/{errors,sessions}`,
 - **Type-only imports.** Use `import type` for types that aren't needed at runtime — required under `verbatimModuleSyntax`:
 
   ```ts
-  import type { NormalizedError } from "@crashscope/core";
-  import { AdapterError } from "@crashscope/core";
+  import type { NormalizedError } from "@pradhankukiran/crashscope-core";
+  import { AdapterError } from "@pradhankukiran/crashscope-core";
   ```
 
 - **No `console.log` outside debug paths.** User-facing output goes through the CLI's formatters in `packages/cli/src/output/`; server logs go through the per-request logger in `packages/server/src/lib/`. Gate diagnostic logging behind an explicit `--debug` flag or `CRASHSCOPE_DEBUG=1` env var.

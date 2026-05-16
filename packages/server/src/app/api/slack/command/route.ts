@@ -20,7 +20,7 @@
 import { randomUUID } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import { waitUntil } from "@vercel/functions";
-import { CrashscopeError } from "@crashscope/core";
+import { CrashscopeError } from "@pradhankukiran/crashscope-core";
 import { loadEnv } from "@/lib/env";
 import { redactError } from "@/lib/redact";
 import {

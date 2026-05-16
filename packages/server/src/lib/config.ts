@@ -6,8 +6,8 @@
  * selected providers* are present, and surfaces a single coherent error when
  * they aren't.
  */
-import type { CrashscopeConfig } from "@crashscope/core";
-import { ConfigError } from "@crashscope/core";
+import type { CrashscopeConfig } from "@pradhankukiran/crashscope-core";
+import { ConfigError } from "@pradhankukiran/crashscope-core";
 import { loadEnv, type ServerEnv } from "./env.js";
 
 /**

@@ -36,8 +36,8 @@ import {
   ValidationError,
   crashscopeConfigSchema,
   type CrashscopeConfig,
-} from "@crashscope/core";
-import type { Severity } from "@crashscope/core";
+} from "@pradhankukiran/crashscope-core";
+import type { Severity } from "@pradhankukiran/crashscope-core";
 import { checkApiToken } from "@/lib/auth";
 import { checkPostTriageLimit } from "@/lib/rate-limit";
 import { redactError } from "@/lib/redact";

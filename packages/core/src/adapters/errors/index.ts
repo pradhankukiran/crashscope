@@ -1,7 +1,7 @@
 /**
  * Barrel for crashscope's error-tracking adapter implementations.
  *
- * Each adapter implements {@link ErrorAdapter} from `@crashscope/core/types`.
+ * Each adapter implements {@link ErrorAdapter} from `@pradhankukiran/crashscope-core/types`.
  * Internal test hooks (e.g. Sentry's `__internal`) are deliberately not
  * re-exported here.
  */
