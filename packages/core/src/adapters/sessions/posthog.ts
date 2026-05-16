@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AdapterError, ValidationError } from "../../errors.js";
+import { AdapterError, ConfigError, ValidationError } from "../../errors.js";
 import {
   normalizedSessionSchema,
   type NormalizedEvent,
@@ -132,15 +132,6 @@ const sleep = (ms: number): Promise<void> =>
     setTimeout(resolve, ms);
   });
 
-/**
- * Strip trailing slashes and protocol from a host. Used to compute the
- * web origin for `replayUrl` while still letting the API call live under the
- * configured host.
- */
-function stripProtocol(host: string): string {
-  return host.replace(/^https?:\/\//i, "").replace(/\/+$/g, "");
-}
-
 /* ------------------------------------------------------------------------- */
 /* PostHog adapter                                                            */
 /* ------------------------------------------------------------------------- */
@@ -178,6 +169,11 @@ export class PostHogAdapter implements SessionAdapter {
   public async fetchForUser(
     opts: FetchForUserOptions,
   ): Promise<NormalizedSession | null> {
+    if (!opts.userId) {
+      // Empty distinct_id would degrade silently into a project-wide recording
+      // sweep; surface the misconfiguration to the caller instead.
+      throw new ConfigError(`[${PROVIDER}] fetchForUser requires a non-empty userId`);
+    }
     const windowMs = opts.windowMs ?? DEFAULT_WINDOW_MS;
     const half = Math.max(0, Math.floor(windowMs / 2));
     const anchor = opts.around.getTime();
@@ -271,14 +267,21 @@ export class PostHogAdapter implements SessionAdapter {
 
   /**
    * Deep link into the PostHog replay UI. Uses the configured host so
-   * self-hosted instances resolve correctly.
+   * self-hosted instances resolve correctly — including over `http://` for
+   * internal deployments. Falls back to the canonical PostHog cloud host if
+   * the configured host can't be parsed as a URL.
    */
   public replayUrl(sessionId: string): string | null {
     if (!sessionId) {
       return null;
     }
-    const origin = stripProtocol(this.host) || stripProtocol(DEFAULT_HOST);
-    return `https://${origin}/project/${encodeURIComponent(
+    let url: URL;
+    try {
+      url = new URL(this.host);
+    } catch {
+      url = new URL(DEFAULT_HOST);
+    }
+    return `${url.protocol}//${url.host}/project/${encodeURIComponent(
       this.projectId,
     )}/replay/${encodeURIComponent(sessionId)}`;
   }
