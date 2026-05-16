@@ -10,7 +10,11 @@ export { investigate } from "./investigate.js";
 export type { InvestigateInput } from "./investigate.js";
 export { resolveAnthropicAuth } from "./auth.js";
 export type { AuthResolution } from "./auth.js";
-export { buildInvestigationPrompt } from "./prompt.js";
+export {
+  buildInvestigationPrompt,
+  sanitizeForPrompt,
+  MAX_PROMPT_CHARS,
+} from "./prompt.js";
 export {
   emitTriageFindingTool,
   EMIT_TRIAGE_FINDING_TOOL_NAME,
