@@ -1,6 +1,11 @@
 import { z, type ZodTypeAny } from "zod";
 
-import { AdapterError, ValidationError } from "../../errors.js";
+import {
+  AdapterError,
+  AuthError,
+  ValidationError,
+  classifyHttpFailure,
+} from "../../errors.js";
 import type {
   ErrorAdapter,
   FetchRecentOptions,
@@ -38,7 +43,16 @@ export interface BugsnagAdapterOptions {
 const PROVIDER = "bugsnag";
 const DEFAULT_BASE_URL = "https://api.bugsnag.com";
 const DEFAULT_LIMIT = 25;
-const MAX_RETRIES = 3;
+/** Bugsnag's Data Access API caps page size at 100. */
+const MAX_LIMIT = 100;
+/**
+ * Total HTTP attempts per request (initial + retries). 4 = 1 initial + 3 retries.
+ *
+ * Replaces the older `MAX_RETRIES = 3` constant which was off-by-one — used
+ * with `attempt < MAX_RETRIES` it meant only 3 total attempts. The new name
+ * matches what the loop guard actually measures.
+ */
+const MAX_ATTEMPTS = 4;
 const BASE_BACKOFF_MS = 250;
 const MAX_BREADCRUMBS = 10;
 const MAX_STACK_FRAMES = 20;
@@ -180,17 +194,22 @@ export class BugsnagAdapter implements ErrorAdapter {
   public async fetchRecent(
     opts: FetchRecentOptions,
   ): Promise<NormalizedError[]> {
-    const limit = Math.max(1, opts.limit ?? DEFAULT_LIMIT);
-    const params = new URLSearchParams();
-    params.set("per_page", String(limit));
-    params.set("sort", "last_seen");
-    // Restrict to open errors only.
-    params.append("filters[error.status][][type]", "eq");
-    params.append("filters[error.status][][value]", "open");
+    const limit = clampLimit(opts.limit);
+    // Bugsnag's filter syntax needs `type` and `value` to live in the **same**
+    // array element (`filters[error.status][0][type]` /
+    // `filters[error.status][0][value]`). `URLSearchParams.append` with
+    // repeated `[]` produces two distinct elements which the API silently
+    // ignores. Hand-build the query string so the indices line up.
+    const query = [
+      `per_page=${limit}`,
+      `sort=last_seen`,
+      `filters[error.status][0][type]=eq`,
+      `filters[error.status][0][value]=open`,
+    ].join("&");
 
     const path = `/projects/${encodeURIComponent(
       this.projectId,
-    )}/errors?${params.toString()}`;
+    )}/errors?${query}`;
     const errors = await this.bugsnagGet(path, bugsnagErrorListSchema);
 
     const sinceMs = opts.since.getTime();
@@ -245,7 +264,12 @@ export class BugsnagAdapter implements ErrorAdapter {
     const unhandled = raw.unhandled === true || this.isUnhandled(event);
     const severity = this.mapSeverity(raw.severity, unhandled);
 
-    const environment = raw.release_stages?.[0] ?? null;
+    // Prefer the latest event's `release_stage` — that's the stage that
+    // actually produced the crash. Falling back to `release_stages[0]` picks
+    // an arbitrary entry from the array, which is fine as a hint but not
+    // authoritative.
+    const environment =
+      event?.app?.release_stage ?? raw.release_stages?.[0] ?? null;
     const releaseVersion =
       event?.app?.version ?? event?.app_version ?? null;
 
@@ -255,7 +279,17 @@ export class BugsnagAdapter implements ErrorAdapter {
     const sourceUrl = this.buildSourceUrl(raw);
     const tags = this.buildTags(raw);
 
-    const firstSeen = raw.first_seen ?? raw.last_seen ?? new Date(0).toISOString();
+    // Don't paper over missing timestamps with `new Date(0)`: a record claiming
+    // "first seen in 1970" poisons downstream sorting and freshness checks
+    // worse than failing fast. Throw with the id so the operator can look the
+    // payload up directly in Bugsnag.
+    if (!raw.first_seen && !raw.last_seen) {
+      throw new AdapterError(
+        PROVIDER,
+        `error ${raw.id} has neither first_seen nor last_seen — cannot normalize`,
+      );
+    }
+    const firstSeen = raw.first_seen ?? (raw.last_seen as string);
     const lastSeen = raw.last_seen ?? firstSeen;
 
     return {
@@ -354,8 +388,16 @@ export class BugsnagAdapter implements ErrorAdapter {
     if (!user) {
       return [];
     }
-    const id = user.id ?? user.email;
-    return id ? [id] : [];
+    // Filter out null/undefined *and* empty strings. The previous code did
+    // `user.id ?? user.email`, which kept `""` (an explicit empty id) and
+    // poisoned downstream user-counting / session-correlation.
+    const candidates: unknown[] = [user.id, user.email, user.name];
+    for (const candidate of candidates) {
+      if (typeof candidate === "string" && candidate.length > 0) {
+        return [candidate];
+      }
+    }
+    return [];
   }
 
   private buildSourceUrl(raw: BugsnagError): string {
@@ -420,24 +462,40 @@ export class BugsnagAdapter implements ErrorAdapter {
       )}/errors/${encodeURIComponent(errorId)}/latest_event`;
       return await this.bugsnagGet(path, bugsnagEventSchema);
     } catch (cause) {
-      // Latest event is optional context; an error here shouldn't abort the
-      // entire fetch. Swallow and continue with no stack/breadcrumbs.
+      // Latest event is optional context; a transient error here shouldn't
+      // abort the entire fetch. ValidationError signals a schema drift we
+      // want surfaced, and AuthError means credentials are bad — there's no
+      // point soldiering on if either of those fires.
       if (cause instanceof ValidationError) {
+        throw cause;
+      }
+      if (cause instanceof AuthError) {
         throw cause;
       }
       return null;
     }
   }
 
+  /**
+   * Issue a GET against the Bugsnag Data Access API.
+   *
+   * Authentication: Bugsnag's Data Access API uses `Authorization: token <T>`
+   * (not `Bearer`). The `X-Version: 2` header pins the response schema to v2
+   * so future schema bumps don't silently change the shape we validate against.
+   *
+   * Status taxonomy is normalised via {@link classifyHttpFailure}:
+   * - 401/403 → {@link AuthError} (terminal — credentials problem).
+   * - 429    → retryable, honoring `Retry-After`.
+   * - 5xx    → retryable, exponential backoff with jitter.
+   * - other  → non-retryable {@link AdapterError}.
+   */
   private async bugsnagGet<TSchema extends ZodTypeAny>(
     path: string,
     schema: TSchema,
   ): Promise<z.infer<TSchema>> {
     const url = `${this.baseUrl}${path}`;
-    let attempt = 0;
     let lastError: unknown;
-    while (attempt < MAX_RETRIES) {
-      attempt += 1;
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
       let response: Response;
       try {
         response = await fetch(url, {
@@ -450,13 +508,13 @@ export class BugsnagAdapter implements ErrorAdapter {
         });
       } catch (cause) {
         lastError = cause;
-        if (attempt >= MAX_RETRIES) {
+        if (attempt + 1 >= MAX_ATTEMPTS) {
           throw new AdapterError(
             PROVIDER,
             `network error calling ${path}: ${String(
               (cause as Error)?.message ?? cause,
             )}`,
-            { cause },
+            { cause, retryable: true },
           );
         }
         await this.sleep(this.backoffMs(attempt));
@@ -484,15 +542,22 @@ export class BugsnagAdapter implements ErrorAdapter {
         return parsed.data;
       }
 
-      const retryable = response.status === 429 || response.status >= 500;
       const bodyPreview = await this.safeReadText(response);
-      lastError = new AdapterError(
+      const classified = classifyHttpFailure(
         PROVIDER,
-        `HTTP ${response.status} from ${path}: ${bodyPreview}`,
+        response.status,
+        `${path} ${bodyPreview}`.trim(),
       );
-
-      if (!retryable || attempt >= MAX_RETRIES) {
-        throw lastError;
+      if (classified instanceof AuthError) {
+        // Auth failures are terminal — retrying just wastes attempts.
+        throw classified;
+      }
+      if (!(classified instanceof AdapterError) || !classified.retryable) {
+        throw classified;
+      }
+      lastError = classified;
+      if (attempt + 1 >= MAX_ATTEMPTS) {
+        throw classified;
       }
       const retryAfter = this.parseRetryAfter(
         response.headers.get("retry-after"),
@@ -502,7 +567,9 @@ export class BugsnagAdapter implements ErrorAdapter {
     // Defensive — loop should always return or throw.
     throw lastError instanceof Error
       ? lastError
-      : new AdapterError(PROVIDER, `exhausted retries for ${path}`);
+      : new AdapterError(PROVIDER, `exhausted retries for ${path}`, {
+          retryable: true,
+        });
   }
 
   private async safeReadText(response: Response): Promise<string> {
@@ -530,8 +597,14 @@ export class BugsnagAdapter implements ErrorAdapter {
     return null;
   }
 
+  /**
+   * Exponential backoff with jitter, expecting a 0-based attempt index.
+   * Capped to prevent the exponent from blowing up if `MAX_ATTEMPTS` is
+   * ever raised.
+   */
   private backoffMs(attempt: number): number {
-    const exponential = BASE_BACKOFF_MS * 2 ** (attempt - 1);
+    const safeAttempt = Math.max(0, Math.min(attempt, 6));
+    const exponential = BASE_BACKOFF_MS * 2 ** safeAttempt;
     const jitter = Math.random() * BASE_BACKOFF_MS;
     return exponential + jitter;
   }
@@ -541,4 +614,16 @@ export class BugsnagAdapter implements ErrorAdapter {
       setTimeout(resolve, ms);
     });
   }
+}
+
+/**
+ * Clamp a caller-supplied `limit` to Bugsnag's accepted range, defaulting if
+ * the input is `Infinity`, NaN, or non-positive. Bugsnag caps the list
+ * endpoint at 100 per page so we never want to send anything higher.
+ */
+function clampLimit(limit: number | undefined): number {
+  if (limit === undefined || !Number.isFinite(limit)) return DEFAULT_LIMIT;
+  const floored = Math.floor(limit);
+  if (floored <= 0) return DEFAULT_LIMIT;
+  return Math.min(MAX_LIMIT, Math.max(1, floored));
 }
