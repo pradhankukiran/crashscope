@@ -66,12 +66,11 @@ export function DemoSection(): JSX.Element {
         <Card className="shadow-sm">
           <CardHeader className="text-center">
             <CardTitle className="text-3xl font-bold tracking-tight">
-              Try it now
+              Preview before you install
             </CardTitle>
             <CardDescription className="mx-auto max-w-2xl text-base">
-              Paste your credentials and run triage live. Nothing is stored on
-              the server — your keys leave your browser only for the duration
-              of one request.
+              Paste your credentials to see crashscope work against your data.
+              When you&rsquo;re convinced, install the CLI.
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-8 pt-2">
