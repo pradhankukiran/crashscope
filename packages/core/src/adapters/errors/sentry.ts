@@ -183,10 +183,15 @@ type SentryEntry = z.infer<typeof sentryEntrySchema>;
 const PROVIDER = "sentry" as const;
 const DEFAULT_BASE_URL = "https://sentry.io";
 const DEFAULT_LIMIT = 25;
-const MAX_RETRIES = 3;
+/**
+ * Total HTTP attempts per request (initial + retries). 4 = 1 initial + 3
+ * retries — same budget every crashscope adapter uses. Replaces the older
+ * `MAX_RETRIES = 3` constant where `attempt <= MAX_RETRIES` quietly meant
+ * the same thing; `MAX_ATTEMPTS` matches what the loop guard measures.
+ */
+const MAX_ATTEMPTS = 4;
 const MAX_FRAMES = 20;
 const MAX_BREADCRUMBS = 10;
-const DEFAULT_TIMEOUT_MS = 15_000;
 
 /**
  * The Sentry issues endpoint only accepts a restricted set of statsPeriod
@@ -583,7 +588,7 @@ export class SentryAdapter implements ErrorAdapter {
       },
       PROVIDER,
       {
-        maxAttempts: MAX_RETRIES + 1,
+        maxAttempts: MAX_ATTEMPTS,
         ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
       },
     );
