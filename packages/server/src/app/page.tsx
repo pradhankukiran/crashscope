@@ -8,6 +8,7 @@
  */
 import { AdapterMatrix } from "./components/AdapterMatrix";
 import { DemoSection } from "./components/DemoSection";
+import { Deploy } from "./components/Deploy";
 import { Hero } from "./components/Hero";
 import { HowItWorks } from "./components/HowItWorks";
 import { QuickStart } from "./components/QuickStart";
@@ -20,6 +21,7 @@ export default function HomePage(): JSX.Element {
       <HowItWorks />
       <AdapterMatrix />
       <QuickStart />
+      <Deploy />
     </main>
   );
 }

@@ -1,0 +1,32 @@
+# Run crashscope's server locally or on any Docker host.
+#
+# Usage:
+#   cp packages/server/.env.example packages/server/.env.local
+#   # fill in real values in packages/server/.env.local
+#   docker compose up -d
+#   # visit http://localhost:3000
+#
+# This file is also the canonical reference for the runtime contract: the
+# image expects PORT, reads env from `.env.local`, exposes /api/health.
+
+services:
+  crashscope:
+    build:
+      context: .
+      dockerfile: packages/server/Dockerfile
+    image: crashscope/server:latest
+    container_name: crashscope-server
+    ports:
+      - "3000:3000"
+    env_file:
+      - packages/server/.env.local
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
