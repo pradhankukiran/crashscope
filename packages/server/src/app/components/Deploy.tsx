@@ -48,8 +48,17 @@ const VERCEL_DEPLOY_URL =
       "https://github.com/pradhankukiran/crashscope/blob/master/packages/server/.env.example",
   }).toString();
 
-const RAILWAY_DEPLOY_URL =
-  "https://railway.com/new/template?template=" + encodeURIComponent(REPO_URL);
+// Railway has no working "deploy this arbitrary GitHub repo via URL" pattern —
+// their /new/template URLs require a pre-published Railway template id, not a
+// GitHub URL. Linking the button to /new lands the visitor on Railway's
+// project-picker where they can pick "Deploy from GitHub repo".
+const RAILWAY_DEPLOY_URL = "https://railway.com/new";
+
+// Render IS happy to deploy from any GitHub URL; the optional render.yaml at
+// the repo root would let it auto-configure, but even without one this flow
+// works.
+const RENDER_DEPLOY_URL =
+  "https://render.com/deploy?repo=" + encodeURIComponent(REPO_URL);
 
 const RAILWAY_LINES = [
   "$ git clone https://github.com/pradhankukiran/crashscope.git",
@@ -68,6 +77,13 @@ const DOCKER_LINES = [
   "$ cd crashscope",
   "$ cp packages/server/.env.example packages/server/.env.local",
   "$ docker compose up -d",
+] as const;
+
+const RENDER_LINES = [
+  "# render auto-detects Dockerfile in the repo",
+  "$ git clone https://github.com/pradhankukiran/crashscope.git",
+  "# then in Render dashboard: New + Web Service",
+  "# point at this repo, Render reads packages/server/Dockerfile",
 ] as const;
 
 interface DeployTarget {
@@ -93,7 +109,7 @@ const TARGETS: readonly DeployTarget[] = [
       "Long-running Node process. Best fit for crashscope — Slack background jobs and multi-minute Claude investigations both run without serverless quirks.",
     badge: "Recommended",
     oneClickUrl: RAILWAY_DEPLOY_URL,
-    oneClickLabel: "Deploy on Railway",
+    oneClickLabel: "Open Railway",
     lines: RAILWAY_LINES,
     copyValue: RAILWAY_LINES.map((l) => l.replace(/^\$\s*/, "")).join("\n"),
     copyAriaLabel: "Copy Railway deploy commands",
@@ -111,6 +127,19 @@ const TARGETS: readonly DeployTarget[] = [
     copyValue: VERCEL_LINES.map((l) => l.replace(/^\$\s*/, "")).join("\n"),
     copyAriaLabel: "Copy Vercel deploy commands",
     tradeoff: "Free tier covers most teams.",
+  },
+  {
+    key: "render",
+    title: "Render",
+    Icon: Server,
+    description:
+      "Long-running container host. Reads the Dockerfile in the repo, no extra config — same runtime model as Railway with a different control plane.",
+    oneClickUrl: RENDER_DEPLOY_URL,
+    oneClickLabel: "Deploy on Render",
+    lines: RENDER_LINES,
+    copyValue: RENDER_LINES.map((l) => l.replace(/^[$#]\s*/, "")).join("\n"),
+    copyAriaLabel: "Copy Render deploy commands",
+    tradeoff: "Free tier for hobby services.",
   },
   {
     key: "docker",
@@ -140,7 +169,7 @@ export function Deploy(): JSX.Element {
           </p>
         </div>
 
-        <div className="mt-12 grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <div className="mt-12 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {TARGETS.map((target) => (
             <Card
               key={target.key}
