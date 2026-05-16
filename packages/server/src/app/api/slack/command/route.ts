@@ -19,6 +19,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
+import { waitUntil } from "@vercel/functions";
 import { CrashscopeError } from "@crashscope/core";
 import { loadEnv } from "@/lib/env";
 import {
@@ -204,9 +205,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     `[slack] /triage start requestId=${requestId} user=${parsed.user_id} channel=${parsed.channel_id}`,
   );
 
-  // Fire-and-forget. Next will keep the function alive long enough for the
-  // promise to settle as long as `maxDuration` permits.
-  void runAndPostback(parsed, requestId);
+  // Fire-and-forget background work, but tell Vercel to keep the function
+  // alive until the promise settles. `waitUntil` is the canonical Next 14 /
+  // Vercel pattern: on serverless, the runtime would otherwise tear the
+  // function down as soon as we `return` below, killing the triage mid-flight.
+  //
+  // Outside Vercel (e.g. `next dev`, self-hosted node), `waitUntil` is a no-op
+  // and the surrounding Node event loop keeps the promise running on its own
+  // because we still hold a reference via the closure. Either way, the
+  // postback eventually fires.
+  waitUntil(runAndPostback(parsed, requestId));
 
   return NextResponse.json(
     {
